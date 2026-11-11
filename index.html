@@ -392,11 +392,13 @@
     }
     const t = lastSync ? new Date(lastSync) : null;
     box.innerHTML = `<div class="st">身分：<b>${isAdmin() ? '老闆' : '員工'}</b>　名字：<b>${esc(sync.name)}</b><br>
+        ${isAdmin() ? `目前員工密碼：<b>${esc(sync.staffKey || '（尚未取得）')}</b><br>` : ''}
         ${queue.length ? `待上傳：<b>${queue.length}</b> 筆` : '紀錄都已上傳'}${syncErr ? `<br><span style="color:var(--warn)">上次同步失敗：${esc(syncErr)}</span>` : ''}
         ${t ? `<br><span style="color:var(--mute);font-size:13px">最後同步 ${pad(t.getMonth()+1)}/${pad(t.getDate())} ${pad(t.getHours())}:${pad(t.getMinutes())}</span>` : ''}</div>
       <div class="row"><button class="btn sec" id="sNow">${flushing ? '同步中…' : '立即同步'}</button>
       ${isAdmin() ? '<button class="btn sec" id="sJoin">複製員工加入碼</button>' : ''}</div>
-      <button class="link" id="sOff" style="margin-top:12px">${pendingOff ? '確定中斷同步？再按一次' : '中斷同步'}</button>`;
+      <button class="link" id="sOff" style="margin-top:12px">${pendingOff ? '確定中斷同步？再按一次' : '中斷同步'}</button>
+      <div style="color:var(--mute);font-size:12px;margin-top:8px">App 版本 v7</div>`;
     $('#sNow').onclick = () => { flush(); if (useCloudStats()) loadCloudDay(viewDay, true); };
     const j = $('#sJoin'); if (j) j.onclick = async () => {
       if (!sync.staffKey) { toast('請先立即同步一次'); return; }

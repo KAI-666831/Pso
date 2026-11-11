@@ -1,5 +1,5 @@
 // 離線快取：第一次連網打開後，之後沒網路也能開
-const CACHE = 'quick-pos-v6';
+const CACHE = 'quick-pos-v7';
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
