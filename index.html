@@ -42,6 +42,20 @@
   .prod .badge{position:absolute;top:-6px;right:-6px;background:var(--accent);color:#fff;border-radius:999px;
     min-width:22px;height:22px;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 6px}
   .prod.custom{border-style:dashed;color:var(--mute)}
+  .shiftbar{display:flex;gap:6px;overflow-x:auto;padding:2px 0 10px;margin:0 -2px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  .shiftbar::-webkit-scrollbar{display:none}
+  .chip{flex:0 0 auto;padding:8px 14px;border-radius:999px;background:#fff;border:1px solid var(--line);font-weight:600;font-size:15px;white-space:nowrap}
+  .chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .chip.add{color:var(--mute);border-style:dashed}
+  .shiftlbl{font-size:12px;color:var(--mute);margin:0 2px 4px}
+  .sitem{display:flex;gap:8px;align-items:center;margin-bottom:6px}
+  .sitem input{flex:1;min-width:0;padding:10px;border:1px solid var(--line);border-radius:9px;background:#fff;font-weight:600}
+  .sitem .x{width:auto;min-width:36px;height:38px;padding:0 8px;border-radius:8px;color:var(--warn);background:#f8ece9;font-weight:700}
+  .newshift{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:8px}
+  .newshift input[type=text]{width:100%;padding:11px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px}
+  .newshift label{display:flex;align-items:center;gap:8px;font-size:15px;color:var(--ink);margin-bottom:10px}
+  .newshift label input{width:20px;height:20px}
+  .newshift button{width:100%;padding:12px;border-radius:10px;background:var(--ink);color:#fff;font-weight:700}
   .sec-h{font-size:13px;font-weight:700;color:var(--mute);margin:14px 4px 6px;letter-spacing:1px}
   .sec-h:first-child{margin-top:2px}
   .cat-h{display:flex;align-items:center;gap:6px;margin:16px 0 6px}
@@ -140,6 +154,7 @@
   <main>
     <!-- 收銀 -->
     <section class="view on" id="v-reg">
+      <div class="shiftbar" data-bar="reg"></div>
       <div id="grid"></div>
       <div class="cart" id="cart"></div>
     </section>
@@ -156,6 +171,8 @@
 
     <!-- 商品 -->
     <section class="view" id="v-prod">
+      <div class="shiftlbl">正在編輯這個班別的商品：</div>
+      <div class="shiftbar" data-bar="prod"></div>
       <form class="pform" id="pform">
         <input class="nmi" id="pName" placeholder="商品名稱" autocomplete="off">
         <input class="pri" id="pPrice" placeholder="價格" inputmode="numeric" autocomplete="off">
@@ -163,6 +180,13 @@
         <button type="submit">＋ 新增商品</button>
       </form>
       <div class="plist" id="plist"></div>
+      <div class="sec-t">班別管理（點名稱可改名）</div>
+      <div id="shiftlist"></div>
+      <form class="newshift" id="newshift">
+        <input type="text" id="nsName" placeholder="新班別名稱，例如：白帶班" autocomplete="off">
+        <label><input type="checkbox" id="nsCopy" checked> 複製目前班別的商品和區塊</label>
+        <button type="submit">＋ 新增班別</button>
+      </form>
       <div class="sec-t">備份（資料只存在這支手機，建議每週備份一次）</div>
       <button class="btn sec" id="bkBtn">備份全部資料（存到檔案 / 傳 LINE）</button>
       <button class="btn sec" id="csvBtn" style="margin-top:8px">匯出銷售明細 Excel（CSV）</button>
@@ -230,16 +254,16 @@
 
   // ---------- backup / restore ----------
   function allData(){
-    const out = { app:'quick-pos', v:1, exported: new Date().toISOString(), products: LS.get('products', []), cats: LS.get('cats', []), days:{} };
+    const out = { app:'quick-pos', v:1, exported: new Date().toISOString(), products: LS.get('products', []), cats: LS.get('cats', []), shifts: LS.get('shifts', []), days:{} };
     try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i);
       if (k && k.startsWith('pos:day:')) out.days[k.slice(8)] = JSON.parse(localStorage.getItem(k)); } } catch(e){}
     return out;
   }
   function csvAll(data){
-    const rows = [['日期','時間','單號','品項','單價','數量','小計','整單合計']];
+    const rows = [['日期','時間','班別','單號','品項','單價','數量','小計','整單合計']];
     Object.keys(data.days).sort().forEach(d => data.days[d].slice().sort((a,b)=>a.ts-b.ts).forEach(o => {
       const t = new Date(o.ts), hm = pad(t.getHours()) + ':' + pad(t.getMinutes());
-      o.items.forEach(i => rows.push([d, hm, o.id, i.name, i.price, i.qty, i.price*i.qty, o.total]));
+      const sn = o.shiftName || shiftName(shiftOf(o)); o.items.forEach(i => rows.push([d, hm, sn, o.id, i.name, i.price, i.qty, i.price*i.qty, o.total]));
     }));
     return '﻿' + rows.map(r => r.map(c => { c = String(c); return /[",\n]/.test(c) ? '"' + c.replace(/"/g,'""') + '"' : c; }).join(',')).join('\n');
   }
@@ -271,7 +295,7 @@
           arr.forEach(o => { if (!ids.has(o.id)) { cur.push(o); added++; } });
           setLocalDay(d, cur);
         });
-        if (!products.length && data.products) { products = data.products; if (data.cats) { cats = data.cats; saveCats(); } saveProducts(); renderAll(); }
+        if (!products.length && data.products) { products = data.products; if (data.cats) { cats = data.cats; saveCats(); } if (data.shifts && data.shifts.length) { shifts = data.shifts; saveShifts(); curShift = shifts[0].id; LS.set('curShift', curShift); } saveProducts(); renderShiftBars(); renderAll(); }
         refreshDay(); toast(`已還原 ${added} 筆`);
       } catch(e){ toast('這不是收銀備份檔'); }
     };
@@ -281,6 +305,7 @@
   async function init(){
     products = LS.get('products', []);
     loadCats();
+    loadShifts();
     if (!LS.ok) toast('這個瀏覽器不能本機儲存');
     try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch(e){}
     if ('serviceWorker' in navigator) { try { navigator.serviceWorker.register('sw.js'); } catch(e){} }
@@ -307,8 +332,8 @@
   }
   function renderGrid(){
     const g = $('#grid');
-    if (!products.length) {
-      g.innerHTML = '<div class="empty">還沒有商品<br><button class="btn sec" id="goProd">去新增商品</button></div>';
+    if (!myProducts().length) {
+      g.innerHTML = '<div class="empty">這個班別還沒有商品<br><button class="btn sec" id="goProd">去新增商品</button></div>';
       $('#goProd').onclick = () => document.querySelector('nav button[data-v=prod]').click();
       return;
     }
@@ -367,7 +392,7 @@
     if (!cart.length || busy) return;
     busy = true;
     const now = new Date(), total = cartTotal(), p = Number(paid) || total;
-    const order = { id: uid(), date: dayKey(now), ts: now.getTime(),
+    const order = { id: uid(), date: dayKey(now), ts: now.getTime(), shift: curShift, shiftName: shiftName(curShift),
       items: cart.map(c => ({ name:c.name, price:c.price, qty:c.qty })), total, paid: p, change: p - total };
     try {
       saveOrder(order);
@@ -402,23 +427,38 @@
     document.querySelector('nav button[data-v=stat]').textContent = isToday ? '今日統計' : '統計';
     const el = $('#stat');
     if (loading) { el.innerHTML = '<div class="empty">讀取中…</div>'; return; }
-    const revenue = dayOrders.reduce((s,o) => s + o.total, 0);
-    const qty = dayOrders.reduce((s,o) => s + o.items.reduce((a,i) => a + i.qty, 0), 0);
+    const all = dayOrders;
+    const list = statShift ? all.filter(o => shiftOf(o) === statShift) : all;
+    const revenue = list.reduce((s,o) => s + o.total, 0);
+    const qty = list.reduce((s,o) => s + o.items.reduce((a,i) => a + i.qty, 0), 0);
     const agg = {};
-    dayOrders.forEach(o => o.items.forEach(i => {
+    list.forEach(o => o.items.forEach(i => {
       const a = agg[i.name] || (agg[i.name] = { name:i.name, qty:0, amt:0 });
       a.qty += i.qty; a.amt += i.qty * i.price;
     }));
     const rows = Object.values(agg).sort((a,b) => b.qty - a.qty || b.amt - a.amt);
     const maxQ = rows.length ? rows[0].qty : 1;
-    if (!dayOrders.length) { el.innerHTML = `<div class="empty">${isToday ? '今天' : '這天'}還沒有成交紀錄</div>`; return; }
-    el.innerHTML = `
+    const present = [...new Set(all.map(shiftOf))];
+    const chipIds = shifts.map(x => x.id).concat(present.filter(id => !shifts.some(x => x.id === id)));
+    const nameOf = id => shiftName(id) || ((all.find(o => shiftOf(o) === id) || {}).shiftName) || '已刪除班別';
+    const chips = chipIds.length > 1 ? `<div class="shiftbar"><button class="chip ${statShift ? '' : 'on'}" data-sf="">全部</button>${
+      chipIds.map(id => `<button class="chip ${statShift === id ? 'on' : ''}" data-sf="${id}">${esc(nameOf(id))}</button>`).join('')}</div>` : '';
+    const bindChips = () => el.querySelectorAll('[data-sf]').forEach(b => b.onclick = () => { statShift = b.dataset.sf; renderStats(); });
+    if (!list.length) { el.innerHTML = chips + `<div class="empty">${isToday ? '今天' : '這天'}${statShift ? '這個班別' : ''}還沒有成交紀錄</div>`; bindChips(); return; }
+    let perShift = '';
+    if (!statShift && present.length > 1) {
+      perShift = `<div class="sec-t">各班別</div><table><thead><tr><th>班別</th><th class="r">筆數</th><th class="r">金額</th></tr></thead><tbody>${
+        present.map(id => { const os = all.filter(o => shiftOf(o) === id);
+          return `<tr><td>${esc(nameOf(id))}</td><td class="r">${os.length}</td><td class="r">${money(os.reduce((t,o) => t + o.total, 0))}</td></tr>`; }).join('')}</tbody></table>`;
+    }
+    el.innerHTML = chips + `
       <div class="kpis">
         <div class="kpi big"><small>營業額</small><b>${money(revenue)}</b></div>
-        <div class="kpi"><small>成交筆數</small><b>${dayOrders.length}</b></div>
+        <div class="kpi"><small>成交筆數</small><b>${list.length}</b></div>
         <div class="kpi"><small>賣出件數</small><b>${qty}</b></div>
-        <div class="kpi"><small>平均客單</small><b>${money(revenue / dayOrders.length)}</b></div>
+        <div class="kpi"><small>平均客單</small><b>${money(revenue / list.length)}</b></div>
       </div>
+      ${perShift}
       <div class="sec-t">賣出品項</div>
       <table><thead><tr><th>品項</th><th class="r">數量</th><th class="r">金額</th></tr></thead><tbody>
         ${rows.map(r => `<tr><td>${esc(r.name)}<div class="bar"><i style="width:${r.qty/maxQ*100}%"></i></div></td><td class="r">${r.qty}</td><td class="r">${money(r.amt)}</td></tr>`).join('')}
@@ -426,12 +466,13 @@
       </tbody></table>
       <button class="btn sec" id="copySum" style="margin-top:10px">複製統計文字</button>
       <div class="sec-t">每筆明細（新到舊）</div>
-      ${dayOrders.slice().reverse().map(o => {
+      ${list.slice().reverse().map(o => {
         const t = new Date(o.ts);
-        return `<div class="order"><div class="top"><span>${pad(t.getHours())}:${pad(t.getMinutes())}</span><span>${money(o.total)}</span></div>
+        return `<div class="order"><div class="top"><span>${pad(t.getHours())}:${pad(t.getMinutes())}${!statShift && present.length > 1 ? ' · ' + esc(nameOf(shiftOf(o))) : ''}</span><span>${money(o.total)}</span></div>
           <div class="its">${o.items.map(i => esc(i.name) + ' ×' + i.qty).join('、')}${o.change > 0 ? ` · 收 ${money(o.paid)} 找 ${money(o.change)}` : ''}</div>
           <button class="del" data-id="${o.id}">${pendingDel === o.id ? '確定刪除？再按一次' : '刪除這筆'}</button></div>`;
       }).join('')}`;
+    bindChips();
     el.querySelectorAll('.del').forEach(b => b.onclick = async () => {
       const id = b.dataset.id;
       if (pendingDel !== id) { pendingDel = id; renderStats(); setTimeout(() => { if (pendingDel === id) { pendingDel = null; renderStats(); } }, 4000); return; }
@@ -440,11 +481,91 @@
       deleteOrder(o); toast('已刪除');
     });
     $('#copySum').onclick = async () => {
-      const txt = `${viewDay} 營業統計\n營業額 ${money(revenue)}｜${dayOrders.length} 筆｜${qty} 件\n` +
+      const txt = `${viewDay}${statShift ? ' ' + nameOf(statShift) : ''} 營業統計\n營業額 ${money(revenue)}｜${dayOrders.length} 筆｜${qty} 件\n` +
         rows.map(r => `${r.name} ×${r.qty}  ${money(r.amt)}`).join('\n');
       try { await navigator.clipboard.writeText(txt); toast('已複製'); } catch(e){ toast('無法複製，請手動截圖'); }
     };
   }
+
+  // ---------- shifts (班別) ----------
+  let shifts = [], curShift = '', legacyShift = '', statShift = '';
+  function loadShifts(){
+    shifts = LS.get('shifts', null);
+    if (!shifts) {
+      const first = { id: uid(), name: '鮪魚班' };
+      shifts = [first];
+      products.forEach(p => { if (!p.shift) p.shift = first.id; });
+      (cats || []).forEach(c => { if (!c.shift) c.shift = first.id; });
+      LS.set('shifts', shifts); LS.set('products', products); LS.set('cats', cats);
+      LS.set('legacyShift', first.id);
+    }
+    legacyShift = LS.get('legacyShift', shifts[0].id);
+    curShift = LS.get('curShift', shifts[0].id);
+    if (!shifts.some(x => x.id === curShift)) curShift = shifts[0].id;
+  }
+  function saveShifts(){ LS.set('shifts', shifts); }
+  const shiftOf = o => o.shift || legacyShift;
+  const shiftName = id => { const x = shifts.find(s => s.id === id); return x ? x.name : ''; };
+  const myProducts = () => products.filter(p => p.shift === curShift);
+  const myCats = () => cats.filter(c => c.shift === curShift);
+  function setShift(id){
+    if (id === curShift) return;
+    if (cart.length) { toast('先結帳或清空本單，再切換班別'); return; }
+    curShift = id; LS.set('curShift', id); lastCat = '';
+    renderShiftBars(); renderGrid(); renderCart(); renderProducts();
+  }
+  function renderShiftBars(){
+    document.querySelectorAll('.shiftbar[data-bar]').forEach(bar => {
+      bar.innerHTML = shifts.map(x => `<button class="chip ${x.id === curShift ? 'on' : ''}" data-shift="${x.id}">${esc(x.name)}</button>`).join('') +
+        (bar.dataset.bar === 'prod' ? '' : '<button class="chip add" data-addshift>＋ 班別</button>');
+      bar.querySelectorAll('[data-shift]').forEach(b => b.onclick = () => setShift(b.dataset.shift));
+      const add = bar.querySelector('[data-addshift]');
+      if (add) add.onclick = () => { document.querySelector('nav button[data-v=prod]').click(); setTimeout(() => { $('#nsName').scrollIntoView({ block:'center' }); $('#nsName').focus(); }, 50); };
+    });
+    renderShiftList();
+  }
+  let pendingS = null;
+  function renderShiftList(){
+    const el = $('#shiftlist');
+    el.innerHTML = shifts.map(x => `<div class="sitem"><input value="${esc(x.name)}" data-sren="${x.id}" aria-label="班別名稱">
+      ${shifts.length > 1 ? `<button class="x" data-sdel="${x.id}">${pendingS === x.id ? '連同商品刪除？' : '✕'}</button>` : ''}</div>`).join('');
+    el.querySelectorAll('[data-sren]').forEach(inp => inp.onchange = () => {
+      const x = shifts.find(s => s.id === inp.dataset.sren), v = inp.value.trim();
+      if (!v) { inp.value = x.name; return; }
+      x.name = v; saveShifts(); renderShiftBars(); renderStats(); toast('已改名');
+    });
+    el.querySelectorAll('[data-sdel]').forEach(b => b.onclick = () => {
+      const id = b.dataset.sdel;
+      if (pendingS !== id) { pendingS = id; renderShiftList(); setTimeout(() => { if (pendingS === id) { pendingS = null; renderShiftList(); } }, 4000); return; }
+      pendingS = null;
+      if (id === curShift && cart.length) { toast('先結帳或清空本單'); return; }
+      shifts = shifts.filter(s => s.id !== id);
+      products = products.filter(p => p.shift !== id);
+      cats = cats.filter(c => c.shift !== id);
+      if (curShift === id) { curShift = shifts[0].id; LS.set('curShift', curShift); }
+      if (statShift === id) statShift = '';
+      saveShifts(); saveCats(); saveProducts();
+      renderShiftBars(); renderGrid(); renderProducts(); renderStats(); toast('班別已刪除（過去的成交紀錄保留）');
+    });
+  }
+  $('#newshift').onsubmit = e => {
+    e.preventDefault();
+    const name = $('#nsName').value.trim();
+    if (!name) { toast('請輸入班別名稱'); return; }
+    if (cart.length) { toast('先結帳或清空本單'); return; }
+    const ns = { id: uid(), name };
+    if ($('#nsCopy').checked) {
+      const map = {};
+      myCats().forEach(c => { const nc = { id: uid(), name: c.name, shift: ns.id }; map[c.id] = nc.id; cats.push(nc); });
+      myProducts().forEach(p => products.push({ id: uid(), name: p.name, price: p.price, cat: map[p.cat], shift: ns.id }));
+    }
+    shifts.push(ns); saveShifts(); saveCats(); saveProducts();
+    $('#nsName').value = '';
+    curShift = ns.id; LS.set('curShift', ns.id); lastCat = '';
+    renderShiftBars(); renderGrid(); renderCart(); renderProducts();
+    try { window.scrollTo(0, 0); } catch(e){}
+    toast(`已新增「${name}」`);
+  };
 
   // ---------- sections (區塊) ----------
   let cats = null;   // [{id,name}]
@@ -474,15 +595,17 @@
   function catIndex(p){ const i = cats.findIndex(c => c.id === p.cat); return i < 0 ? 999 : i; }
   function saveCats(){ LS.set('cats', cats); }
   function sections(){
-    const out = cats.map(c => ({ cat:c, items: products.filter(p => p.cat === c.id) }));
-    const loose = products.filter(p => !cats.some(c => c.id === p.cat));
-    if (loose.length || !cats.length) out.push({ cat:{ id:'', name:'未分類' }, items: loose });
+    const cs = myCats(), ps = myProducts();
+    const out = cs.map(c => ({ cat:c, items: ps.filter(p => p.cat === c.id) }));
+    const loose = ps.filter(p => !cs.some(c => c.id === p.cat));
+    if (loose.length || !cs.length) out.push({ cat:{ id:'', name:'未分類' }, items: loose });
     return out;
   }
   let lastCat = '';
   function catOptions(sel){
-    return cats.map(c => `<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${esc(c.name)}</option>`).join('') +
-      `<option value="" ${!sel || !cats.some(c => c.id === sel) ? 'selected' : ''}>未分類</option>`;
+    const cs = myCats();
+    return cs.map(c => `<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${esc(c.name)}</option>`).join('') +
+      `<option value="" ${!sel || !cs.some(c => c.id === sel) ? 'selected' : ''}>未分類</option>`;
   }
 
   // ---------- products ----------
@@ -493,8 +616,9 @@
     if (!name || !price) { toast('請輸入名稱和價格'); return; }
     const cat = $('#pCat').value; lastCat = cat;
     // insert after the last product of the same section
-    let at = -1; products.forEach((p,i) => { if ((p.cat || '') === cat || (!cat && !cats.some(c => c.id === p.cat))) at = i; });
-    products.splice(at < 0 ? products.length : at + 1, 0, { id: uid(), name, price, cat: cat || undefined });
+    const cs = myCats();
+    let at = -1; products.forEach((p,i) => { if (p.shift === curShift && ((p.cat || '') === cat || (!cat && !cs.some(c => c.id === p.cat)))) at = i; });
+    products.splice(at < 0 ? products.length : at + 1, 0, { id: uid(), name, price, cat: cat || undefined, shift: curShift });
     $('#pName').value = ''; $('#pPrice').value = ''; $('#pName').focus();
     saveProducts(); renderProducts(); renderGrid();
   };
@@ -530,7 +654,7 @@
       const p = byId(sel.dataset.mv);
       products = products.filter(x => x !== p);
       p.cat = sel.value || undefined;
-      let at = -1; products.forEach((q,i) => { if ((q.cat || '') === (p.cat || '')) at = i; });
+      let at = -1; products.forEach((q,i) => { if (q.shift === curShift && (q.cat || '') === (p.cat || '')) at = i; });
       products.splice(at < 0 ? products.length : at + 1, 0, p);
       saveProducts(); renderProducts(); renderGrid(); toast('已移動');
     });
@@ -555,8 +679,10 @@
       c.name = v; saveCats(); renderGrid(); renderProducts(); toast('已改名');
     });
     el.querySelectorAll('[data-cup]').forEach(b => b.onclick = () => {
-      const i = cats.findIndex(c => c.id === b.dataset.cup); if (i <= 0) return;
-      [cats[i-1], cats[i]] = [cats[i], cats[i-1]];
+      const i = cats.findIndex(c => c.id === b.dataset.cup);
+      let j = i - 1; while (j >= 0 && cats[j].shift !== curShift) j--;
+      if (j < 0) return;
+      [cats[j], cats[i]] = [cats[i], cats[j]];
       saveCats(); renderProducts(); renderGrid();
     });
     el.querySelectorAll('[data-cdel]').forEach(b => b.onclick = () => {
@@ -570,7 +696,7 @@
     $('#addcat').onsubmit = e => {
       e.preventDefault();
       const v = $('#newCat').value.trim(); if (!v) { toast('請輸入區塊名稱'); return; }
-      const c = { id: uid(), name: v }; cats.push(c); lastCat = c.id;
+      const c = { id: uid(), name: v, shift: curShift }; cats.push(c); lastCat = c.id;
       saveCats(); renderProducts(); renderGrid(); toast('已新增區塊');
     };
   }
@@ -580,7 +706,7 @@
   // ---------- misc ----------
   let tt;
   function toast(m){ const t = $('#toast'); t.textContent = m; t.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('on'), 2000); }
-  function renderAll(){ renderGrid(); renderCart(); renderProducts(); }
+  function renderAll(){ renderShiftBars(); renderGrid(); renderCart(); renderProducts(); }
 
   init();
 })();
