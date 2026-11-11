@@ -56,6 +56,16 @@
   .newshift label{display:flex;align-items:center;gap:8px;font-size:15px;color:var(--ink);margin-bottom:10px}
   .newshift label input{width:20px;height:20px}
   .newshift button{width:100%;padding:12px;border-radius:10px;background:var(--ink);color:#fff;font-weight:700}
+  .syncbox{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+  .syncbox input{width:100%;padding:11px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;font-size:16px}
+  .syncbox .row{display:flex;gap:8px}
+  .syncbox .row button{flex:1}
+  .syncbox p{margin:0 0 10px;font-size:14px;color:var(--mute);line-height:1.5}
+  .syncbox .st{font-size:15px;margin-bottom:10px;line-height:1.6}
+  .tabs2{display:flex;gap:6px;margin-bottom:10px}
+  .tabs2 button{flex:1;padding:9px 0;border-radius:9px;background:#f0ede6;font-weight:600}
+  .tabs2 button.on{background:var(--ink);color:#fff}
+  .note{background:var(--soft);border-radius:12px;padding:12px;font-size:14px;line-height:1.5;margin-bottom:10px}
   .sec-h{font-size:13px;font-weight:700;color:var(--mute);margin:14px 4px 6px;letter-spacing:1px}
   .sec-h:first-child{margin-top:2px}
   .cat-h{display:flex;align-items:center;gap:6px;margin:16px 0 6px}
@@ -171,6 +181,8 @@
 
     <!-- 商品 -->
     <section class="view" id="v-prod">
+      <div class="note" id="staffNote" hidden>商品和價格由老闆統一設定，會自動更新。<br>要臨時加品項，請在收銀頁用「＋ 自訂」。</div>
+      <div id="adminOnly">
       <div class="shiftlbl">正在編輯這個班別的商品：</div>
       <div class="shiftbar" data-bar="prod"></div>
       <form class="pform" id="pform">
@@ -187,7 +199,10 @@
         <label><input type="checkbox" id="nsCopy" checked> 複製目前班別的商品和區塊</label>
         <button type="submit">＋ 新增班別</button>
       </form>
-      <div class="sec-t">備份（資料只存在這支手機，建議每週備份一次）</div>
+      </div>
+      <div class="sec-t">雲端同步（Google 試算表）</div>
+      <div class="syncbox" id="syncbox"></div>
+      <div class="sec-t">備份（沒開雲端同步時，建議每週備份一次）</div>
       <button class="btn sec" id="bkBtn">備份全部資料（存到檔案 / 傳 LINE）</button>
       <button class="btn sec" id="csvBtn" style="margin-top:8px">匯出銷售明細 Excel（CSV）</button>
       <button class="btn sec" id="rsBtn" style="margin-top:8px">從備份檔還原</button>
@@ -237,20 +252,205 @@
     const lastBk = LS.get('lastBackup', 0);
     const days = lastBk ? Math.floor((Date.now() - lastBk) / 86400000) : null;
     if (!LS.ok) { el.textContent = '⚠︎ 無法儲存'; el.classList.add('bad'); return; }
+    if (sync) {
+      el.textContent = queue.length ? `${flushing ? '上傳中' : '已存手機'} · ${queue.length} 筆待上傳` : (syncErr ? '已存手機 · 雲端連不上' : '☁︎ 已同步');
+      el.classList.toggle('bad', !!syncErr && queue.length > 0); return;
+    }
     el.textContent = days === null ? '已存手機 · 尚未備份' : (days >= 7 ? `已存手機 · ${days} 天沒備份` : '已存手機');
     el.classList.toggle('bad', days === null || days >= 7);
   }
   function localDay(date){ return LS.get('day:' + date, []); }
   function setLocalDay(date, arr){ return LS.set('day:' + date, arr); }
-  function refreshDay(){ dayOrders = localDay(viewDay).slice().sort((a,b) => a.ts - b.ts); renderStats(); setSync(); }
-  function saveProducts(){ if (!LS.set('products', products)) toast('儲存失敗'); }
+  function refreshDay(){
+    let list = localDay(viewDay);
+    if (useCloudStats() && cloud[viewDay]) {
+      const m = new Map(); cloud[viewDay].forEach(o => m.set(o.id, o)); list.forEach(o => m.set(o.id, o));
+      const pendDel = new Set(queue.filter(q => q.op === 'del').map(q => q.order.id));
+      list = [...m.values()].filter(o => !pendDel.has(o.id));
+    }
+    dayOrders = list.slice().sort((a,b) => a.ts - b.ts); renderStats(); setSync();
+  }
+  function saveProducts(){ if (!LS.set('products', products)) toast('儲存失敗'); configChanged(); }
   function saveOrder(order){
     const all = localDay(order.date); all.push(order);
     if (!setLocalDay(order.date, all)) throw new Error('local');
+    if (sync) { queue.push({ op:'add', order }); saveQueue(); flush(); }
+    if (cloud[order.date]) cloud[order.date] = cloud[order.date].concat([order]);
     if (order.date === viewDay) refreshDay();
   }
-  function deleteOrder(o){ setLocalDay(o.date, localDay(o.date).filter(x => x.id !== o.id)); refreshDay(); }
-  function watchDay(){ refreshDay(); }
+  function deleteOrder(o){
+    setLocalDay(o.date, localDay(o.date).filter(x => x.id !== o.id));
+    if (cloud[o.date]) cloud[o.date] = cloud[o.date].filter(x => x.id !== o.id);
+    if (sync) {
+      const i = queue.findIndex(q => q.op === 'add' && q.order.id === o.id);
+      if (i >= 0 && !flushing) queue.splice(i, 1); else queue.push({ op:'del', order:{ id:o.id, date:o.date } });
+      saveQueue(); flush();
+    }
+    refreshDay();
+  }
+  function watchDay(){ refreshDay(); if (useCloudStats()) loadCloudDay(viewDay); }
+
+  // ---------- cloud sync (Google 試算表) ----------
+  let sync = LS.get('sync', null);       // {url,key,role,name,dev,staffKey}
+  let queue = LS.get('queue', []);       // pending ops {op:'add'|'del', order}
+  let configDirty = LS.get('configDirty', false);
+  let flushing = false, flushAgain = false, retryT = null, syncErr = '', lastSync = LS.get('lastSync', 0);
+  let cloud = {};                        // date -> orders from all phones (owner only)
+  let cloudLoading = {}, cloudErr = {}, statSrc = 'cloud';
+  const isStaff = () => !!(sync && sync.role === 'staff');
+  const isAdmin = () => !!(sync && sync.role === 'admin');
+  const useCloudStats = () => isAdmin() && statSrc === 'cloud';
+  function saveQueue(){ LS.set('queue', queue); setSync(); }
+  function configChanged(){
+    if (!isAdmin()) return;
+    configDirty = true; LS.set('configDirty', true); flush();
+  }
+  async function api(action, extra, override){
+    const s = override || sync;
+    const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 25000);
+    try {
+      const r = await fetch(s.url, { method:'POST', body: JSON.stringify(Object.assign({ action, key: s.key, dev: s.dev }, extra || {})), signal: ctl.signal });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || '同步失敗');
+      return j;
+    } catch(e) {
+      if (e.name === 'AbortError') throw new Error('連線逾時');
+      if (e instanceof TypeError) throw new Error('連不上網路或網址錯誤');
+      throw e;
+    } finally { clearTimeout(t); }
+  }
+  function buildConfig(){ return { v: Date.now(), products, cats, shifts }; }
+  function applyConfig(c){
+    if (!c || !c.products) return false;
+    if (c.v && c.v === LS.get('configV', 0)) return false;
+    products = c.products; cats = c.cats || []; shifts = (c.shifts && c.shifts.length) ? c.shifts : shifts;
+    LS.set('products', products); LS.set('cats', cats); LS.set('shifts', shifts); LS.set('configV', c.v || 0);
+    if (!shifts.some(x => x.id === curShift) && !cart.length) { curShift = shifts[0].id; LS.set('curShift', curShift); }
+    renderAll(); return true;
+  }
+  async function flush(){
+    if (!sync) return;
+    if (flushing) { flushAgain = true; return; }
+    flushing = true; clearTimeout(retryT); setSync();
+    try {
+      if (isAdmin() && configDirty) {
+        await api('setConfig', { config: buildConfig() });
+        configDirty = false; LS.set('configDirty', false);
+      }
+      while (queue.length) {
+        const n = Math.min(queue.length, 40);
+        await api('push', { ops: queue.slice(0, n) });
+        queue.splice(0, n); saveQueue();
+      }
+      if (isStaff()) { const j = await api('getConfig'); if (applyConfig(j.config)) toast('商品已更新'); }
+      syncErr = ''; lastSync = Date.now(); LS.set('lastSync', lastSync);
+    } catch(e) {
+      syncErr = e.message || '同步失敗';
+      retryT = setTimeout(flush, navigator.onLine === false ? 60000 : 20000);
+    } finally {
+      flushing = false; setSync(); renderSyncBox();
+      if (flushAgain && !syncErr) { flushAgain = false; flush(); } else flushAgain = false;
+    }
+  }
+  async function loadCloudDay(date, force){
+    if (!isAdmin() || cloudLoading[date] || (cloud[date] && !force)) return;
+    cloudLoading[date] = true; cloudErr[date] = '';
+    if (date === viewDay) renderStats();
+    try { const j = await api('day', { date }); cloud[date] = j.orders || []; }
+    catch(e){ cloudErr[date] = e.message || '讀取失敗'; }
+    finally { cloudLoading[date] = false; if (date === viewDay) refreshDay(); }
+  }
+  window.addEventListener('online', () => flush());
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { flush(); if (useCloudStats()) loadCloudDay(viewDay, true); } });
+  setInterval(() => { if (sync && (queue.length || configDirty)) flush(); }, 60000);
+
+  // join code = base64 of {u,k}
+  const enc = o => btoa(unescape(encodeURIComponent(JSON.stringify(o))));
+  const dec = t => JSON.parse(decodeURIComponent(escape(atob(String(t).trim()))));
+  let syncTab = 'admin';
+  function renderSyncBox(){
+    const box = $('#syncbox'); if (!box) return;
+    $('#staffNote').hidden = !isStaff();
+    $('#adminOnly').hidden = isStaff();
+    if (!sync) {
+      box.innerHTML = `<p>連上你的 Google 試算表後，每支手機結帳都會自動上傳（沒網路時先存手機，有網路再補傳），老闆可以看到所有人加總的統計。</p>
+        <div class="tabs2"><button data-st="admin" class="${syncTab==='admin'?'on':''}">我是老闆</button><button data-st="staff" class="${syncTab==='staff'?'on':''}">我是員工</button></div>
+        ${syncTab === 'admin'
+          ? `<input id="sUrl" placeholder="貼上試算表的網頁應用程式網址" autocomplete="off">
+             <input id="sKey" placeholder="老闆密碼" autocomplete="off">
+             <input id="sName" placeholder="你的名字（統計裡顯示）" value="老闆" autocomplete="off">`
+          : `<input id="sCode" placeholder="貼上老闆給你的加入碼" autocomplete="off">
+             <input id="sName" placeholder="你的名字（統計裡顯示）" autocomplete="off">`}
+        <button class="btn" id="sGo" style="margin-top:4px">連線</button>`;
+      box.querySelectorAll('[data-st]').forEach(b => b.onclick = () => { syncTab = b.dataset.st; renderSyncBox(); });
+      $('#sGo').onclick = connect;
+      return;
+    }
+    const t = lastSync ? new Date(lastSync) : null;
+    box.innerHTML = `<div class="st">身分：<b>${isAdmin() ? '老闆' : '員工'}</b>　名字：<b>${esc(sync.name)}</b><br>
+        ${queue.length ? `待上傳：<b>${queue.length}</b> 筆` : '紀錄都已上傳'}${syncErr ? `<br><span style="color:var(--warn)">上次同步失敗：${esc(syncErr)}</span>` : ''}
+        ${t ? `<br><span style="color:var(--mute);font-size:13px">最後同步 ${pad(t.getMonth()+1)}/${pad(t.getDate())} ${pad(t.getHours())}:${pad(t.getMinutes())}</span>` : ''}</div>
+      <div class="row"><button class="btn sec" id="sNow">${flushing ? '同步中…' : '立即同步'}</button>
+      ${isAdmin() ? '<button class="btn sec" id="sJoin">複製員工加入碼</button>' : ''}</div>
+      <button class="link" id="sOff" style="margin-top:12px">${pendingOff ? '確定中斷同步？再按一次' : '中斷同步'}</button>`;
+    $('#sNow').onclick = () => { flush(); if (useCloudStats()) loadCloudDay(viewDay, true); };
+    const j = $('#sJoin'); if (j) j.onclick = async () => {
+      if (!sync.staffKey) { toast('請先立即同步一次'); return; }
+      const code = enc({ u: sync.url, k: sync.staffKey });
+      try { await navigator.clipboard.writeText(code); toast('已複製，用 LINE 傳給員工'); }
+      catch(e){ prompt2(code); }
+    };
+    $('#sOff').onclick = () => {
+      if (!pendingOff) { pendingOff = true; renderSyncBox(); setTimeout(() => { pendingOff = false; renderSyncBox(); }, 4000); return; }
+      pendingOff = false;
+      if (queue.length && !isAdmin()) { toast(`還有 ${queue.length} 筆沒上傳，先同步再中斷`); return; }
+      sync = null; LS.set('sync', null); queue = []; saveQueue(); cloud = {};
+      renderAll(); refreshDay(); toast('已中斷同步');
+    };
+  }
+  let pendingOff = false;
+  function prompt2(code){
+    const box = $('#syncbox');
+    box.insertAdjacentHTML('beforeend', `<p style="margin-top:10px">手動複製這段加入碼：</p><input value="${esc(code)}" readonly onclick="this.select()">`);
+  }
+  async function connect(){
+    const btn = $('#sGo'); const name = ($('#sName').value || '').trim();
+    let cand;
+    try {
+      if (syncTab === 'admin') {
+        const url = ($('#sUrl').value || '').trim(), key = ($('#sKey').value || '').trim();
+        if (!/^https:\/\/script\.google(usercontent)?\.com\//.test(url)) { toast('網址不對，要是 script.google.com 開頭'); return; }
+        if (!key) { toast('請輸入老闆密碼'); return; }
+        cand = { url, key, role:'admin', name: name || '老闆' };
+      } else {
+        let c; try { c = dec($('#sCode').value); } catch(e){ toast('加入碼不對，請重新複製'); return; }
+        if (!name) { toast('請輸入你的名字'); return; }
+        cand = { url: c.u, key: c.k, role:'staff', name };
+      }
+      cand.dev = LS.get('dev', '') || uid(); LS.set('dev', cand.dev);
+      btn.disabled = true; btn.textContent = '連線中…';
+      const h = await api('hello', {}, cand);
+      if (h.role !== cand.role) { toast(cand.role === 'admin' ? '這是員工密碼，請用老闆密碼' : '加入碼錯誤'); return; }
+      if (h.staffKey) cand.staffKey = h.staffKey;
+      const g = await api('getConfig', {}, cand);
+      sync = cand; LS.set('sync', sync);
+      if (isStaff()) { LS.set('configV', 0); applyConfig(g.config) || toast('老闆還沒上傳商品設定'); }
+      else if (g.config && g.config.products && !myProducts().length && !products.length) applyConfig(g.config);
+      else { configDirty = true; LS.set('configDirty', true); }
+      // 把這支手機以前的成交紀錄也傳上去（試算表會自動略過重複的）
+      Object.keys(allData().days).forEach(d => {
+        const arr = localDay(d);
+        arr.forEach(o => { if (!o.by) o.by = sync.name; queue.push({ op:'add', order:o }); });
+        setLocalDay(d, arr);
+      });
+      saveQueue(); renderAll(); refreshDay(); flush();
+      toast('連線成功');
+    } catch(e) {
+      toast(e.message || '連線失敗');
+    } finally {
+      if (btn && document.body.contains(btn)) { btn.disabled = false; btn.textContent = '連線'; }
+    }
+  }
 
   // ---------- backup / restore ----------
   function allData(){
@@ -310,6 +510,7 @@
     try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch(e){}
     if ('serviceWorker' in navigator) { try { navigator.serviceWorker.register('sw.js'); } catch(e){} }
     renderAll(); refreshDay();
+    if (sync) { flush(); if (useCloudStats()) loadCloudDay(viewDay); }
     $('#bkBtn').onclick = doBackup;
     $('#csvBtn').onclick = doCsv;
     $('#rsBtn').onclick = () => $('#rsFile').click();
@@ -392,7 +593,7 @@
     if (!cart.length || busy) return;
     busy = true;
     const now = new Date(), total = cartTotal(), p = Number(paid) || total;
-    const order = { id: uid(), date: dayKey(now), ts: now.getTime(), shift: curShift, shiftName: shiftName(curShift),
+    const order = { id: uid(), date: dayKey(now), ts: now.getTime(), shift: curShift, shiftName: shiftName(curShift), by: sync ? sync.name : '',
       items: cart.map(c => ({ name:c.name, price:c.price, qty:c.qty })), total, paid: p, change: p - total };
     try {
       saveOrder(order);
@@ -427,6 +628,14 @@
     document.querySelector('nav button[data-v=stat]').textContent = isToday ? '今日統計' : '統計';
     const el = $('#stat');
     if (loading) { el.innerHTML = '<div class="empty">讀取中…</div>'; return; }
+    const src = isAdmin() ? `<div class="tabs2"><button data-src="cloud" class="${statSrc==='cloud'?'on':''}">全部人（雲端）</button><button data-src="local" class="${statSrc==='local'?'on':''}">只看這支手機</button></div>` +
+      (useCloudStats() ? (cloudLoading[viewDay] ? '<div class="note">正在讀取所有人的紀錄…</div>'
+        : cloudErr[viewDay] ? `<div class="note" style="background:#f8ece9">讀不到雲端（${esc(cloudErr[viewDay])}），先顯示這支手機的資料。<button class="link" data-reload>重試</button></div>`
+        : `<div style="text-align:right;margin:-4px 2px 8px"><button class="link" data-reload>重新整理</button></div>`) : '') : '';
+    const bindSrc = () => {
+      el.querySelectorAll('[data-src]').forEach(b => b.onclick = () => { statSrc = b.dataset.src; refreshDay(); if (useCloudStats()) loadCloudDay(viewDay); });
+      el.querySelectorAll('[data-reload]').forEach(b => b.onclick = () => loadCloudDay(viewDay, true));
+    };
     const all = dayOrders;
     const list = statShift ? all.filter(o => shiftOf(o) === statShift) : all;
     const revenue = list.reduce((s,o) => s + o.total, 0);
@@ -441,9 +650,9 @@
     const present = [...new Set(all.map(shiftOf))];
     const chipIds = shifts.map(x => x.id).concat(present.filter(id => !shifts.some(x => x.id === id)));
     const nameOf = id => shiftName(id) || ((all.find(o => shiftOf(o) === id) || {}).shiftName) || '已刪除班別';
-    const chips = chipIds.length > 1 ? `<div class="shiftbar"><button class="chip ${statShift ? '' : 'on'}" data-sf="">全部</button>${
-      chipIds.map(id => `<button class="chip ${statShift === id ? 'on' : ''}" data-sf="${id}">${esc(nameOf(id))}</button>`).join('')}</div>` : '';
-    const bindChips = () => el.querySelectorAll('[data-sf]').forEach(b => b.onclick = () => { statShift = b.dataset.sf; renderStats(); });
+    const chips = src + (chipIds.length > 1 ? `<div class="shiftbar"><button class="chip ${statShift ? '' : 'on'}" data-sf="">全部</button>${
+      chipIds.map(id => `<button class="chip ${statShift === id ? 'on' : ''}" data-sf="${id}">${esc(nameOf(id))}</button>`).join('')}</div>` : '');
+    const bindChips = () => { bindSrc(); el.querySelectorAll('[data-sf]').forEach(b => b.onclick = () => { statShift = b.dataset.sf; renderStats(); }); };
     if (!list.length) { el.innerHTML = chips + `<div class="empty">${isToday ? '今天' : '這天'}${statShift ? '這個班別' : ''}還沒有成交紀錄</div>`; bindChips(); return; }
     let perShift = '';
     if (!statShift && present.length > 1) {
@@ -451,6 +660,14 @@
         present.map(id => { const os = all.filter(o => shiftOf(o) === id);
           return `<tr><td>${esc(nameOf(id))}</td><td class="r">${os.length}</td><td class="r">${money(os.reduce((t,o) => t + o.total, 0))}</td></tr>`; }).join('')}</tbody></table>`;
     }
+    const people = [...new Set(list.map(o => o.by || ''))];
+    if (people.length > 1 || (people.length === 1 && useCloudStats() && people[0])) {
+      perShift += `<div class="sec-t">各人員</div><table><thead><tr><th>人員</th><th class="r">筆數</th><th class="r">金額</th></tr></thead><tbody>${
+        people.map(p => { const os = list.filter(o => (o.by || '') === p);
+          return `<tr><td>${esc(p || '（未填名字）')}</td><td class="r">${os.length}</td><td class="r">${money(os.reduce((t,o) => t + o.total, 0))}</td></tr>`; }).join('')}</tbody></table>`;
+    }
+    const myDev = sync ? sync.dev : '';
+    const localIds = new Set(localDay(viewDay).map(o => o.id));
     el.innerHTML = chips + `
       <div class="kpis">
         <div class="kpi big"><small>營業額</small><b>${money(revenue)}</b></div>
@@ -468,9 +685,9 @@
       <div class="sec-t">每筆明細（新到舊）</div>
       ${list.slice().reverse().map(o => {
         const t = new Date(o.ts);
-        return `<div class="order"><div class="top"><span>${pad(t.getHours())}:${pad(t.getMinutes())}${!statShift && present.length > 1 ? ' · ' + esc(nameOf(shiftOf(o))) : ''}</span><span>${money(o.total)}</span></div>
+        return `<div class="order"><div class="top"><span>${pad(t.getHours())}:${pad(t.getMinutes())}${!statShift && present.length > 1 ? ' · ' + esc(nameOf(shiftOf(o))) : ''}${o.by && people.length > 1 ? ' · ' + esc(o.by) : ''}</span><span>${money(o.total)}</span></div>
           <div class="its">${o.items.map(i => esc(i.name) + ' ×' + i.qty).join('、')}${o.change > 0 ? ` · 收 ${money(o.paid)} 找 ${money(o.change)}` : ''}</div>
-          <button class="del" data-id="${o.id}">${pendingDel === o.id ? '確定刪除？再按一次' : '刪除這筆'}</button></div>`;
+          ${isAdmin() || localIds.has(o.id) ? `<button class="del" data-id="${o.id}">${pendingDel === o.id ? '確定刪除？再按一次' : '刪除這筆'}</button>` : ''}</div>`;
       }).join('')}`;
     bindChips();
     el.querySelectorAll('.del').forEach(b => b.onclick = async () => {
@@ -481,7 +698,7 @@
       deleteOrder(o); toast('已刪除');
     });
     $('#copySum').onclick = async () => {
-      const txt = `${viewDay}${statShift ? ' ' + nameOf(statShift) : ''} 營業統計\n營業額 ${money(revenue)}｜${dayOrders.length} 筆｜${qty} 件\n` +
+      const txt = `${viewDay}${statShift ? ' ' + nameOf(statShift) : ''} 營業統計\n營業額 ${money(revenue)}｜${list.length} 筆｜${qty} 件\n` +
         rows.map(r => `${r.name} ×${r.qty}  ${money(r.amt)}`).join('\n');
       try { await navigator.clipboard.writeText(txt); toast('已複製'); } catch(e){ toast('無法複製，請手動截圖'); }
     };
@@ -503,7 +720,7 @@
     curShift = LS.get('curShift', shifts[0].id);
     if (!shifts.some(x => x.id === curShift)) curShift = shifts[0].id;
   }
-  function saveShifts(){ LS.set('shifts', shifts); }
+  function saveShifts(){ LS.set('shifts', shifts); configChanged(); }
   const shiftOf = o => o.shift || legacyShift;
   const shiftName = id => { const x = shifts.find(s => s.id === id); return x ? x.name : ''; };
   const myProducts = () => products.filter(p => p.shift === curShift);
@@ -517,7 +734,7 @@
   function renderShiftBars(){
     document.querySelectorAll('.shiftbar[data-bar]').forEach(bar => {
       bar.innerHTML = shifts.map(x => `<button class="chip ${x.id === curShift ? 'on' : ''}" data-shift="${x.id}">${esc(x.name)}</button>`).join('') +
-        (bar.dataset.bar === 'prod' ? '' : '<button class="chip add" data-addshift>＋ 班別</button>');
+        (bar.dataset.bar === 'prod' || isStaff() ? '' : '<button class="chip add" data-addshift>＋ 班別</button>');
       bar.querySelectorAll('[data-shift]').forEach(b => b.onclick = () => setShift(b.dataset.shift));
       const add = bar.querySelector('[data-addshift]');
       if (add) add.onclick = () => { document.querySelector('nav button[data-v=prod]').click(); setTimeout(() => { $('#nsName').scrollIntoView({ block:'center' }); $('#nsName').focus(); }, 50); };
@@ -593,7 +810,7 @@
     LS.set('cats', cats); LS.set('products', products);
   }
   function catIndex(p){ const i = cats.findIndex(c => c.id === p.cat); return i < 0 ? 999 : i; }
-  function saveCats(){ LS.set('cats', cats); }
+  function saveCats(){ LS.set('cats', cats); configChanged(); }
   function sections(){
     const cs = myCats(), ps = myProducts();
     const out = cs.map(c => ({ cat:c, items: ps.filter(p => p.cat === c.id) }));
@@ -706,7 +923,7 @@
   // ---------- misc ----------
   let tt;
   function toast(m){ const t = $('#toast'); t.textContent = m; t.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('on'), 2000); }
-  function renderAll(){ renderShiftBars(); renderGrid(); renderCart(); renderProducts(); }
+  function renderAll(){ renderShiftBars(); renderGrid(); renderCart(); renderProducts(); renderSyncBox(); }
 
   init();
 })();
