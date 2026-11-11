@@ -42,6 +42,18 @@
   .prod .badge{position:absolute;top:-6px;right:-6px;background:var(--accent);color:#fff;border-radius:999px;
     min-width:22px;height:22px;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 6px}
   .prod.custom{border-style:dashed;color:var(--mute)}
+  .sec-h{font-size:13px;font-weight:700;color:var(--mute);margin:14px 4px 6px;letter-spacing:1px}
+  .sec-h:first-child{margin-top:2px}
+  .cat-h{display:flex;align-items:center;gap:6px;margin:16px 0 6px}
+  .cat-h input{flex:1;min-width:0;padding:9px 10px;border:1px solid var(--line);border-radius:9px;font-weight:700;background:#efece4}
+  .cat-h span{flex:1;font-weight:700;padding:9px 4px;color:var(--mute)}
+  .cat-h button{width:34px;height:36px;border-radius:8px;background:#ebe7dd}
+  .cat-h .x{color:var(--warn);background:#f8ece9;font-weight:700;width:auto;min-width:34px;padding:0 8px}
+  .pitem select{padding:8px 4px;border:1px solid var(--line);border-radius:8px;background:#fff;max-width:84px;font-size:14px}
+  .pform select{flex:1 1 100%;padding:11px;border:1px solid var(--line);border-radius:10px;background:#fff;font-size:16px}
+  .addcat{display:flex;gap:8px;margin-top:14px}
+  .addcat input{flex:1;min-width:0;padding:11px;border:1px solid var(--line);border-radius:10px}
+  .addcat button{padding:0 16px;border-radius:10px;background:var(--ink);color:#fff;font-weight:700}
   .empty{background:var(--card);border:1px dashed var(--line);border-radius:12px;padding:24px;text-align:center;color:var(--mute)}
   .empty button{margin-top:10px}
 
@@ -128,7 +140,7 @@
   <main>
     <!-- 收銀 -->
     <section class="view on" id="v-reg">
-      <div class="grid" id="grid"></div>
+      <div id="grid"></div>
       <div class="cart" id="cart"></div>
     </section>
 
@@ -147,6 +159,7 @@
       <form class="pform" id="pform">
         <input class="nmi" id="pName" placeholder="商品名稱" autocomplete="off">
         <input class="pri" id="pPrice" placeholder="價格" inputmode="numeric" autocomplete="off">
+        <select id="pCat"></select>
         <button type="submit">＋ 新增商品</button>
       </form>
       <div class="plist" id="plist"></div>
@@ -217,7 +230,7 @@
 
   // ---------- backup / restore ----------
   function allData(){
-    const out = { app:'quick-pos', v:1, exported: new Date().toISOString(), products: LS.get('products', []), days:{} };
+    const out = { app:'quick-pos', v:1, exported: new Date().toISOString(), products: LS.get('products', []), cats: LS.get('cats', []), days:{} };
     try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i);
       if (k && k.startsWith('pos:day:')) out.days[k.slice(8)] = JSON.parse(localStorage.getItem(k)); } } catch(e){}
     return out;
@@ -258,7 +271,7 @@
           arr.forEach(o => { if (!ids.has(o.id)) { cur.push(o); added++; } });
           setLocalDay(d, cur);
         });
-        if (!products.length && data.products) { products = data.products; saveProducts(); renderAll(); }
+        if (!products.length && data.products) { products = data.products; if (data.cats) { cats = data.cats; saveCats(); } saveProducts(); renderAll(); }
         refreshDay(); toast(`已還原 ${added} 筆`);
       } catch(e){ toast('這不是收銀備份檔'); }
     };
@@ -267,6 +280,7 @@
 
   async function init(){
     products = LS.get('products', []);
+    loadCats();
     if (!LS.ok) toast('這個瀏覽器不能本機儲存');
     try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch(e){}
     if ('serviceWorker' in navigator) { try { navigator.serviceWorker.register('sw.js'); } catch(e){} }
@@ -294,18 +308,23 @@
   function renderGrid(){
     const g = $('#grid');
     if (!products.length) {
-      g.innerHTML = '<div class="empty" style="grid-column:1/-1">還沒有商品<br><button class="btn sec" id="goProd">去新增商品</button></div>';
+      g.innerHTML = '<div class="empty">還沒有商品<br><button class="btn sec" id="goProd">去新增商品</button></div>';
       $('#goProd').onclick = () => document.querySelector('nav button[data-v=prod]').click();
-    } else {
-      g.innerHTML = products.map(p => {
-        const inCart = cart.find(c => c.key === 'p:' + p.id);
-        return `<button class="prod" data-id="${p.id}"><span class="n">${esc(p.name)}</span><span class="p">${money(p.price)}</span>${inCart ? `<span class="badge">${inCart.qty}</span>` : ''}</button>`;
-      }).join('') + '<button class="prod custom" id="custom"><span class="n">＋ 自訂</span><span class="p">臨時品項</span></button>';
-      g.querySelectorAll('.prod[data-id]').forEach(b => b.onclick = () => {
-        const p = products.find(x => x.id === b.dataset.id); if (p) addToCart(p.name, p.price, 'p:' + p.id);
-      });
-      $('#custom').onclick = openCustom;
+      return;
     }
+    const secs = sections().filter(x => x.items.length);
+    const btn = p => {
+      const inCart = cart.find(c => c.key === 'p:' + p.id);
+      return `<button class="prod" data-id="${p.id}"><span class="n">${esc(p.name)}</span><span class="p">${money(p.price)}</span>${inCart ? `<span class="badge">${inCart.qty}</span>` : ''}</button>`;
+    };
+    const showHead = secs.length > 1 || (secs[0] && secs[0].cat.id);
+    g.innerHTML = secs.map(x => (showHead ? `<div class="sec-h">${esc(x.cat.name)}</div>` : '') +
+        `<div class="grid">${x.items.map(btn).join('')}</div>`).join('') +
+      `${showHead ? '<div class="sec-h">其他</div>' : ''}<div class="grid" style="${showHead ? '' : 'margin-top:8px'}"><button class="prod custom" id="custom"><span class="n">＋ 自訂</span><span class="p">臨時品項</span></button></div>`;
+    g.querySelectorAll('.prod[data-id]').forEach(b => b.onclick = () => {
+      const p = products.find(x => x.id === b.dataset.id); if (p) addToCart(p.name, p.price, 'p:' + p.id);
+    });
+    $('#custom').onclick = openCustom;
   }
   function cartTotal(){ return cart.reduce((s,c) => s + c.price * c.qty, 0); }
   function renderCart(){
@@ -427,44 +446,135 @@
     };
   }
 
+  // ---------- sections (區塊) ----------
+  let cats = null;   // [{id,name}]
+  function loadCats(){
+    cats = LS.get('cats', null);
+    if (cats) return;
+    cats = [];
+    // first run of this version: group existing products the way they were arranged
+    const norm = t => String(t).replace(/（/g,'(').replace(/）/g,')').replace(/\s+/g,'').toLowerCase();
+    const preset = [
+      ['出船', ['釣手','觀光']],
+      ['套組', ['新手包','電捲(整組)','手捲(整組)']],
+      ['單品', ['電捲(單)','手捲(單)','釣竿(單)','船竿架']],
+      ['配件', ['鐵板(500g)','鐵板(400g)','天秤(300)','天秤(200)','天秤(100)','弓角']]
+    ];
+    preset.forEach(([name, list]) => {
+      const set = new Set(list.map(norm));
+      const hit = products.filter(p => set.has(norm(p.name)));
+      if (!hit.length) return;
+      const c = { id: uid(), name }; cats.push(c);
+      hit.forEach(p => p.cat = c.id);
+    });
+    // keep product order grouped by section
+    if (cats.length) products.sort((a,b) => catIndex(a) - catIndex(b));
+    LS.set('cats', cats); LS.set('products', products);
+  }
+  function catIndex(p){ const i = cats.findIndex(c => c.id === p.cat); return i < 0 ? 999 : i; }
+  function saveCats(){ LS.set('cats', cats); }
+  function sections(){
+    const out = cats.map(c => ({ cat:c, items: products.filter(p => p.cat === c.id) }));
+    const loose = products.filter(p => !cats.some(c => c.id === p.cat));
+    if (loose.length || !cats.length) out.push({ cat:{ id:'', name:'未分類' }, items: loose });
+    return out;
+  }
+  let lastCat = '';
+  function catOptions(sel){
+    return cats.map(c => `<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${esc(c.name)}</option>`).join('') +
+      `<option value="" ${!sel || !cats.some(c => c.id === sel) ? 'selected' : ''}>未分類</option>`;
+  }
+
   // ---------- products ----------
   $('#pform').onsubmit = e => {
     e.preventDefault();
     const name = $('#pName').value.trim();
     const price = Number(String($('#pPrice').value).replace(/[^\d.]/g,''));
     if (!name || !price) { toast('請輸入名稱和價格'); return; }
-    products.push({ id: uid(), name, price });
+    const cat = $('#pCat').value; lastCat = cat;
+    // insert after the last product of the same section
+    let at = -1; products.forEach((p,i) => { if ((p.cat || '') === cat || (!cat && !cats.some(c => c.id === p.cat))) at = i; });
+    products.splice(at < 0 ? products.length : at + 1, 0, { id: uid(), name, price, cat: cat || undefined });
     $('#pName').value = ''; $('#pPrice').value = ''; $('#pName').focus();
     saveProducts(); renderProducts(); renderGrid();
   };
   function renderProducts(){
+    $('#pCat').innerHTML = catOptions(lastCat);
     const el = $('#plist');
-    if (!products.length) { el.innerHTML = '<div class="empty">輸入名稱和價格後按「新增商品」<br>收銀頁就會出現按鈕</div>'; return; }
-    el.innerHTML = products.map((p,i) => `<div class="pitem" data-i="${i}">
-      <button class="mv" data-up="${i}" ${i===0?'disabled style="opacity:.3"':''}>↑</button>
-      <input class="nmi" value="${esc(p.name)}" data-f="name">
-      <input class="pri" value="${p.price}" inputmode="numeric" data-f="price">
-      <button class="x" data-x="${i}">${pendingP === p.id ? '確定' : '✕'}</button></div>`).join('') +
-      '<div style="color:var(--mute);font-size:13px;padding:6px 4px">改名或改價後點別處即儲存；已結帳的紀錄不受影響。</div>';
+    const secs = sections();
+    el.innerHTML = secs.map((x, si) => {
+      const head = x.cat.id
+        ? `<div class="cat-h"><input value="${esc(x.cat.name)}" data-rename="${x.cat.id}" aria-label="區塊名稱">
+            <button data-cup="${x.cat.id}" ${si===0?'disabled style="opacity:.3"':''}>↑</button>
+            <button class="x" data-cdel="${x.cat.id}">${pendingC === x.cat.id ? '刪除區塊？' : '✕'}</button></div>`
+        : `<div class="cat-h"><span>未分類</span></div>`;
+      const rows = x.items.map((p, k) => `<div class="pitem" data-id="${p.id}">
+        <button class="mv" data-up="${p.id}" ${k===0?'disabled style="opacity:.3"':''}>↑</button>
+        <input class="nmi" value="${esc(p.name)}" data-f="name">
+        <input class="pri" value="${p.price}" inputmode="numeric" data-f="price">
+        <select data-mv="${p.id}" aria-label="移到區塊">${catOptions(p.cat)}</select>
+        <button class="x" data-x="${p.id}">${pendingP === p.id ? '確定' : '✕'}</button></div>`).join('');
+      return head + (rows || '<div style="color:var(--mute);font-size:13px;padding:4px 6px 8px">這個區塊還沒有商品</div>');
+    }).join('') +
+      `<form class="addcat" id="addcat"><input id="newCat" placeholder="新區塊名稱" autocomplete="off"><button type="submit">＋ 新增區塊</button></form>
+       <div style="color:var(--mute);font-size:13px;padding:8px 4px">點區塊名稱可以直接改名；商品右邊的選單可以換區塊。改完點別處即儲存，已結帳的紀錄不受影響。</div>`;
+
+    const byId = id => products.find(p => p.id === id);
     el.querySelectorAll('.pitem input').forEach(inp => inp.onchange = () => {
-      const i = +inp.closest('.pitem').dataset.i, f = inp.dataset.f;
-      if (f === 'price') { const v = Number(inp.value.replace(/[^\d.]/g,'')); if (!v) { inp.value = products[i].price; return; } products[i].price = v; }
-      else { const v = inp.value.trim(); if (!v) { inp.value = products[i].name; return; } products[i].name = v; }
+      const p = byId(inp.closest('.pitem').dataset.id), f = inp.dataset.f;
+      if (f === 'price') { const v = Number(inp.value.replace(/[^\d.]/g,'')); if (!v) { inp.value = p.price; return; } p.price = v; }
+      else { const v = inp.value.trim(); if (!v) { inp.value = p.name; return; } p.name = v; }
       saveProducts(); renderGrid(); toast('已儲存');
     });
+    el.querySelectorAll('[data-mv]').forEach(sel => sel.onchange = () => {
+      const p = byId(sel.dataset.mv);
+      products = products.filter(x => x !== p);
+      p.cat = sel.value || undefined;
+      let at = -1; products.forEach((q,i) => { if ((q.cat || '') === (p.cat || '')) at = i; });
+      products.splice(at < 0 ? products.length : at + 1, 0, p);
+      saveProducts(); renderProducts(); renderGrid(); toast('已移動');
+    });
     el.querySelectorAll('[data-up]').forEach(b => b.onclick = () => {
-      const i = +b.dataset.up; if (!i) return;
-      [products[i-1], products[i]] = [products[i], products[i-1]];
+      const p = byId(b.dataset.up);
+      const sec = sections().find(x => x.items.includes(p)).items;
+      const prev = sec[sec.indexOf(p) - 1]; if (!prev) return;
+      const i = products.indexOf(p), j = products.indexOf(prev);
+      [products[i], products[j]] = [products[j], products[i]];
       saveProducts(); renderProducts(); renderGrid();
     });
     el.querySelectorAll('[data-x]').forEach(b => b.onclick = () => {
-      const p = products[+b.dataset.x];
+      const p = byId(b.dataset.x);
       if (pendingP !== p.id) { pendingP = p.id; renderProducts(); setTimeout(() => { if (pendingP === p.id) { pendingP = null; renderProducts(); } }, 4000); return; }
       pendingP = null;
       products = products.filter(x => x.id !== p.id);
       saveProducts(); renderProducts(); renderGrid();
     });
+    el.querySelectorAll('[data-rename]').forEach(inp => inp.onchange = () => {
+      const c = cats.find(x => x.id === inp.dataset.rename), v = inp.value.trim();
+      if (!v) { inp.value = c.name; return; }
+      c.name = v; saveCats(); renderGrid(); renderProducts(); toast('已改名');
+    });
+    el.querySelectorAll('[data-cup]').forEach(b => b.onclick = () => {
+      const i = cats.findIndex(c => c.id === b.dataset.cup); if (i <= 0) return;
+      [cats[i-1], cats[i]] = [cats[i], cats[i-1]];
+      saveCats(); renderProducts(); renderGrid();
+    });
+    el.querySelectorAll('[data-cdel]').forEach(b => b.onclick = () => {
+      const id = b.dataset.cdel;
+      if (pendingC !== id) { pendingC = id; renderProducts(); setTimeout(() => { if (pendingC === id) { pendingC = null; renderProducts(); } }, 4000); return; }
+      pendingC = null;
+      cats = cats.filter(c => c.id !== id);
+      products.forEach(p => { if (p.cat === id) p.cat = undefined; });
+      saveCats(); saveProducts(); renderProducts(); renderGrid(); toast('區塊已刪除，商品移到未分類');
+    });
+    $('#addcat').onsubmit = e => {
+      e.preventDefault();
+      const v = $('#newCat').value.trim(); if (!v) { toast('請輸入區塊名稱'); return; }
+      const c = { id: uid(), name: v }; cats.push(c); lastCat = c.id;
+      saveCats(); renderProducts(); renderGrid(); toast('已新增區塊');
+    };
   }
+  let pendingC = null;
   let pendingP = null;
 
   // ---------- misc ----------
