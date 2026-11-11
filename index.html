@@ -374,7 +374,7 @@
     $('#adminOnly').hidden = isStaff();
     if (!sync) {
       box.innerHTML = `<p>連上你的 Google 試算表後，每支手機結帳都會自動上傳（沒網路時先存手機，有網路再補傳），老闆可以看到所有人加總的統計。</p>
-        <div class="tabs2"><button data-st="admin" class="${syncTab==='admin'?'on':''}">我是老闆</button><button data-st="staff" class="${syncTab==='staff'?'on':''}">我是員工</button></div>
+        <div class="tabs2"><button data-st="admin" class="${syncTab==='admin'?'on':''}">我是老闆</button><button data-st="staff" class="${syncTab==='staff'?'on':''}">我有加入碼</button></div>
         ${syncTab === 'admin'
           ? `<input id="sUrl" placeholder="貼上試算表的網頁應用程式網址" autocomplete="off">
              <input id="sKey" placeholder="老闆密碼" autocomplete="off">
