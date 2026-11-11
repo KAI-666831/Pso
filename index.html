@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="收銀">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#f6f4ef">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<title>快速收銀</title>
+<style>
+  :root{
+    --bg:#f6f4ef; --card:#fff; --ink:#1d1d1b; --mute:#7a776f; --line:#e6e2d8;
+    --accent:#0f6e5a; --accent-ink:#fff; --warn:#b4432f; --soft:#e8f2ee;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;font-size:16px}
+  button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
+  input{font:inherit}
+  .app{max-width:720px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
+  header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px 8px}
+  header h1{font-size:19px;margin:0;letter-spacing:.5px}
+  .sync{font-size:12px;color:var(--mute)}
+  .sync.bad{color:var(--warn)}
+  nav{display:flex;gap:6px;padding:0 12px 10px}
+  nav button{flex:1;padding:10px 0;border-radius:10px;background:#ebe7dd;font-weight:600;font-size:15px}
+  nav button.on{background:var(--ink);color:#fff}
+  main{flex:1;padding:0 12px 24px}
+  .view{display:none}.view.on{display:block}
+
+  /* register */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:8px}
+  .prod{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 8px;min-height:74px;
+    display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;position:relative}
+  .prod:active{transform:scale(.97);background:var(--soft)}
+  .prod .n{font-weight:600;font-size:15px;line-height:1.25;word-break:break-all}
+  .prod .p{color:var(--mute);font-size:13px;margin-top:3px}
+  .prod .badge{position:absolute;top:-6px;right:-6px;background:var(--accent);color:#fff;border-radius:999px;
+    min-width:22px;height:22px;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 6px}
+  .prod.custom{border-style:dashed;color:var(--mute)}
+  .empty{background:var(--card);border:1px dashed var(--line);border-radius:12px;padding:24px;text-align:center;color:var(--mute)}
+  .empty button{margin-top:10px}
+
+  .cart{margin-top:14px;background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  .cart-h{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line);font-size:14px;color:var(--mute)}
+  .line{display:flex;align-items:center;padding:8px 14px;border-bottom:1px solid var(--line);gap:8px}
+  .line .nm{flex:1;min-width:0}
+  .line .nm small{color:var(--mute);display:block}
+  .qty{display:flex;align-items:center;gap:4px}
+  .qty button{width:32px;height:32px;border-radius:8px;background:#f0ede6;font-size:18px;font-weight:700}
+  .qty span{min-width:22px;text-align:center;font-weight:600}
+  .line .sub{width:72px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+  .total{display:flex;justify-content:space-between;align-items:baseline;padding:12px 14px}
+  .total b{font-size:30px;font-variant-numeric:tabular-nums}
+  .pay{padding:0 14px 14px}
+  .pay-row{display:flex;gap:8px;align-items:center}
+  .pay-row input{flex:1;min-width:0;padding:12px;border:1px solid var(--line);border-radius:10px;font-size:20px;font-variant-numeric:tabular-nums}
+  .quick{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+  .quick button{flex:1;min-width:60px;padding:9px 0;border-radius:9px;background:#f0ede6;font-weight:600;font-size:14px}
+  .change{margin-top:10px;display:flex;justify-content:space-between;font-size:17px}
+  .change b{font-size:24px;color:var(--accent);font-variant-numeric:tabular-nums}
+  .change.short b{color:var(--warn)}
+  .btn{display:block;width:100%;padding:15px;border-radius:12px;background:var(--accent);color:var(--accent-ink);font-weight:700;font-size:18px;margin-top:12px}
+  .btn:disabled{opacity:.35}
+  .btn.sec{background:#ebe7dd;color:var(--ink);font-size:15px;padding:11px}
+  .link{color:var(--mute);font-size:13px;text-decoration:underline}
+
+  /* stats */
+  .daybar{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+  .daybar button{width:40px;height:40px;border-radius:10px;background:#ebe7dd;font-size:18px}
+  .daybar input{flex:1;padding:9px;border:1px solid var(--line);border-radius:10px;background:#fff;text-align:center}
+  .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+  .kpi small{color:var(--mute);font-size:12px}
+  .kpi b{display:block;font-size:20px;margin-top:2px;font-variant-numeric:tabular-nums}
+  .kpi.big{grid-column:1/-1}.kpi.big b{font-size:32px;color:var(--accent)}
+  .sec-t{font-size:14px;color:var(--mute);margin:16px 2px 6px}
+  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line);font-size:15px}
+  th{font-size:12px;color:var(--mute);font-weight:600;background:#faf9f5}
+  td.r,th.r{text-align:right;font-variant-numeric:tabular-nums}
+  .bar{height:4px;background:var(--soft);border-radius:2px;margin-top:4px}
+  .bar i{display:block;height:100%;background:var(--accent);border-radius:2px}
+  .order{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:6px}
+  .order .top{display:flex;justify-content:space-between;font-weight:600}
+  .order .its{color:var(--mute);font-size:13px;margin-top:3px}
+  .order .del{color:var(--warn);font-size:13px;margin-top:6px}
+
+  /* products */
+  .pform{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;gap:8px;flex-wrap:wrap}
+  .pform input{padding:11px;border:1px solid var(--line);border-radius:10px;min-width:0}
+  .pform .nmi{flex:2 1 140px}.pform .pri{flex:1 1 80px}
+  .pform button{flex:1 1 100%;padding:12px;border-radius:10px;background:var(--accent);color:#fff;font-weight:700}
+  .plist{margin-top:10px}
+  .pitem{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px 10px;margin-bottom:6px}
+  .pitem input{padding:8px;border:1px solid var(--line);border-radius:8px;min-width:0}
+  .pitem .nmi{flex:2}.pitem .pri{flex:1;max-width:96px}
+  .pitem .mv{width:30px;height:34px;border-radius:8px;background:#f0ede6}
+  .pitem .x{width:34px;height:34px;border-radius:8px;color:var(--warn);background:#f8ece9;font-weight:700}
+
+  /* modal + toast */
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;align-items:flex-end;justify-content:center;z-index:10}
+  .modal.on{display:flex}
+  .sheet{background:#fff;width:100%;max-width:720px;border-radius:18px 18px 0 0;padding:18px 16px 24px}
+  .sheet h3{margin:0 0 12px}
+  .sheet input{width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;font-size:17px}
+  .sheet .row{display:flex;gap:8px}
+  .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(80px);background:var(--ink);color:#fff;
+    padding:10px 18px;border-radius:999px;font-size:15px;transition:transform .25s;z-index:20;white-space:nowrap}
+  .toast.on{transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>快速收銀</h1>
+    <span class="sync" id="sync"></span>
+  </header>
+  <nav>
+    <button data-v="reg" class="on">收銀</button>
+    <button data-v="stat">今日統計</button>
+    <button data-v="prod">設定 / 備份</button>
+  </nav>
+  <main>
+    <!-- 收銀 -->
+    <section class="view on" id="v-reg">
+      <div class="grid" id="grid"></div>
+      <div class="cart" id="cart"></div>
+    </section>
+
+    <!-- 統計 -->
+    <section class="view" id="v-stat">
+      <div class="daybar">
+        <button id="dPrev">‹</button>
+        <input type="date" id="dPick">
+        <button id="dNext">›</button>
+      </div>
+      <div id="stat"></div>
+    </section>
+
+    <!-- 商品 -->
+    <section class="view" id="v-prod">
+      <form class="pform" id="pform">
+        <input class="nmi" id="pName" placeholder="商品名稱" autocomplete="off">
+        <input class="pri" id="pPrice" placeholder="價格" inputmode="numeric" autocomplete="off">
+        <button type="submit">＋ 新增商品</button>
+      </form>
+      <div class="plist" id="plist"></div>
+      <div class="sec-t">備份（資料只存在這支手機，建議每週備份一次）</div>
+      <button class="btn sec" id="bkBtn">備份全部資料（存到檔案 / 傳 LINE）</button>
+      <button class="btn sec" id="csvBtn" style="margin-top:8px">匯出銷售明細 Excel（CSV）</button>
+      <button class="btn sec" id="rsBtn" style="margin-top:8px">從備份檔還原</button>
+      <input type="file" id="rsFile" accept=".json,application/json" hidden>
+    </section>
+  </main>
+</div>
+
+<div class="modal" id="modal">
+  <div class="sheet">
+    <h3>自訂品項</h3>
+    <input id="cName" placeholder="名稱（可留空）" autocomplete="off">
+    <input id="cPrice" placeholder="金額" inputmode="numeric" autocomplete="off">
+    <div class="row">
+      <button class="btn sec" id="cCancel">取消</button>
+      <button class="btn sec" id="cOk" style="background:var(--accent);color:#fff">加入</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  const $ = s => document.querySelector(s);
+  const money = n => 'NT$' + Math.round(n).toLocaleString('zh-TW');
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const pad = n => String(n).padStart(2,'0');
+  const dayKey = d => d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
+  const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+
+  // ---------- state ----------
+  let products = [];      // {id,name,price}
+  let cart = [];          // {key,name,price,qty}
+  let paid = '';
+  let viewDay = dayKey(new Date());
+  let dayOrders = [];     // orders for viewDay
+  
+
+  // ---------- storage: this phone only (works fully offline) ----------
+  const LS = {
+    ok: (() => { try { localStorage.setItem('pos:t','1'); localStorage.removeItem('pos:t'); return true; } catch(e){ return false; } })(),
+    get(k, d){ try { const v = localStorage.getItem('pos:'+k); return v ? JSON.parse(v) : d; } catch(e){ return d; } },
+    set(k, v){ try { localStorage.setItem('pos:'+k, JSON.stringify(v)); return true; } catch(e){ return false; } }
+  };
+  function setSync(){
+    const el = $('#sync');
+    const lastBk = LS.get('lastBackup', 0);
+    const days = lastBk ? Math.floor((Date.now() - lastBk) / 86400000) : null;
+    if (!LS.ok) { el.textContent = '⚠︎ 無法儲存'; el.classList.add('bad'); return; }
+    el.textContent = days === null ? '已存手機 · 尚未備份' : (days >= 7 ? `已存手機 · ${days} 天沒備份` : '已存手機');
+    el.classList.toggle('bad', days === null || days >= 7);
+  }
+  function localDay(date){ return LS.get('day:' + date, []); }
+  function setLocalDay(date, arr){ return LS.set('day:' + date, arr); }
+  function refreshDay(){ dayOrders = localDay(viewDay).slice().sort((a,b) => a.ts - b.ts); renderStats(); setSync(); }
+  function saveProducts(){ if (!LS.set('products', products)) toast('儲存失敗'); }
+  function saveOrder(order){
+    const all = localDay(order.date); all.push(order);
+    if (!setLocalDay(order.date, all)) throw new Error('local');
+    if (order.date === viewDay) refreshDay();
+  }
+  function deleteOrder(o){ setLocalDay(o.date, localDay(o.date).filter(x => x.id !== o.id)); refreshDay(); }
+  function watchDay(){ refreshDay(); }
+
+  // ---------- backup / restore ----------
+  function allData(){
+    const out = { app:'quick-pos', v:1, exported: new Date().toISOString(), products: LS.get('products', []), days:{} };
+    try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i);
+      if (k && k.startsWith('pos:day:')) out.days[k.slice(8)] = JSON.parse(localStorage.getItem(k)); } } catch(e){}
+    return out;
+  }
+  function csvAll(data){
+    const rows = [['日期','時間','單號','品項','單價','數量','小計','整單合計']];
+    Object.keys(data.days).sort().forEach(d => data.days[d].slice().sort((a,b)=>a.ts-b.ts).forEach(o => {
+      const t = new Date(o.ts), hm = pad(t.getHours()) + ':' + pad(t.getMinutes());
+      o.items.forEach(i => rows.push([d, hm, o.id, i.name, i.price, i.qty, i.price*i.qty, o.total]));
+    }));
+    return '﻿' + rows.map(r => r.map(c => { c = String(c); return /[",\n]/.test(c) ? '"' + c.replace(/"/g,'""') + '"' : c; }).join(',')).join('\n');
+  }
+  async function shareFile(name, text, type){
+    const file = new File([text], name, { type });
+    if (navigator.canShare && navigator.canShare({ files:[file] })) {
+      try { await navigator.share({ files:[file] }); return true; }
+      catch(e){ if (e && e.name === 'AbortError') return false; }
+    }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove(); return true;
+  }
+  async function doBackup(){
+    const data = allData(), stamp = dayKey(new Date());
+    if (await shareFile(`收銀備份-${stamp}.json`, JSON.stringify(data), 'application/json')) {
+      LS.set('lastBackup', Date.now()); setSync(); toast('備份檔已產生');
+    }
+  }
+  async function doCsv(){ await shareFile(`銷售明細-${dayKey(new Date())}.csv`, csvAll(allData()), 'text/csv'); }
+  function doRestore(file){
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        const data = JSON.parse(r.result);
+        if (data.app !== 'quick-pos') throw 0;
+        let added = 0;
+        Object.entries(data.days || {}).forEach(([d, arr]) => {
+          const cur = localDay(d), ids = new Set(cur.map(o => o.id));
+          arr.forEach(o => { if (!ids.has(o.id)) { cur.push(o); added++; } });
+          setLocalDay(d, cur);
+        });
+        if (!products.length && data.products) { products = data.products; saveProducts(); renderAll(); }
+        refreshDay(); toast(`已還原 ${added} 筆`);
+      } catch(e){ toast('這不是收銀備份檔'); }
+    };
+    r.readAsText(file);
+  }
+
+  async function init(){
+    products = LS.get('products', []);
+    if (!LS.ok) toast('這個瀏覽器不能本機儲存');
+    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch(e){}
+    if ('serviceWorker' in navigator) { try { navigator.serviceWorker.register('sw.js'); } catch(e){} }
+    renderAll(); refreshDay();
+    $('#bkBtn').onclick = doBackup;
+    $('#csvBtn').onclick = doCsv;
+    $('#rsBtn').onclick = () => $('#rsFile').click();
+    $('#rsFile').onchange = e => { if (e.target.files[0]) doRestore(e.target.files[0]); e.target.value = ''; };
+  }
+
+  // ---------- tabs ----------
+  document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+    document.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x === b));
+    document.querySelectorAll('.view').forEach(v => v.classList.toggle('on', v.id === 'v-' + b.dataset.v));
+    if (b.dataset.v === 'stat') renderStats();
+  });
+
+  // ---------- register ----------
+  function addToCart(name, price, key){
+    const k = key || ('c:' + name + ':' + price);
+    const ex = cart.find(c => c.key === k);
+    if (ex) ex.qty++; else cart.push({ key:k, name, price, qty:1 });
+    renderGrid(); renderCart();
+  }
+  function renderGrid(){
+    const g = $('#grid');
+    if (!products.length) {
+      g.innerHTML = '<div class="empty" style="grid-column:1/-1">還沒有商品<br><button class="btn sec" id="goProd">去新增商品</button></div>';
+      $('#goProd').onclick = () => document.querySelector('nav button[data-v=prod]').click();
+    } else {
+      g.innerHTML = products.map(p => {
+        const inCart = cart.find(c => c.key === 'p:' + p.id);
+        return `<button class="prod" data-id="${p.id}"><span class="n">${esc(p.name)}</span><span class="p">${money(p.price)}</span>${inCart ? `<span class="badge">${inCart.qty}</span>` : ''}</button>`;
+      }).join('') + '<button class="prod custom" id="custom"><span class="n">＋ 自訂</span><span class="p">臨時品項</span></button>';
+      g.querySelectorAll('.prod[data-id]').forEach(b => b.onclick = () => {
+        const p = products.find(x => x.id === b.dataset.id); if (p) addToCart(p.name, p.price, 'p:' + p.id);
+      });
+      $('#custom').onclick = openCustom;
+    }
+  }
+  function cartTotal(){ return cart.reduce((s,c) => s + c.price * c.qty, 0); }
+  function renderCart(){
+    const el = $('#cart');
+    const total = cartTotal();
+    const count = cart.reduce((s,c) => s + c.qty, 0);
+    const p = Number(paid) || 0;
+    const ch = p - total;
+    el.innerHTML = `
+      <div class="cart-h"><span>本單 ${count} 件</span>${cart.length ? '<button class="link" id="clr">清空</button>' : ''}</div>
+      ${cart.map((c,i) => `<div class="line"><div class="nm">${esc(c.name)}<small>${money(c.price)}</small></div>
+        <div class="qty"><button data-i="${i}" data-d="-1">−</button><span>${c.qty}</span><button data-i="${i}" data-d="1">＋</button></div>
+        <div class="sub">${money(c.price*c.qty)}</div></div>`).join('')}
+      <div class="total"><span>合計</span><b>${money(total)}</b></div>
+      <div class="pay">
+        <div class="pay-row"><input id="paid" inputmode="numeric" placeholder="收現金（可不填）" value="${esc(paid)}"></div>
+        <div class="quick">
+          <button data-q="exact">剛好</button><button data-q="100">100</button><button data-q="500">500</button><button data-q="1000">1000</button>
+        </div>
+        ${p ? `<div class="change ${ch < 0 ? 'short' : ''}"><span>${ch < 0 ? '還差' : '找零'}</span><b>${money(Math.abs(ch))}</b></div>` : ''}
+        <button class="btn" id="checkout" ${!cart.length || (p && ch < 0) ? 'disabled' : ''}>結帳 ${cart.length ? money(total) : ''}</button>
+      </div>`;
+    el.querySelectorAll('.qty button').forEach(b => b.onclick = () => {
+      const c = cart[+b.dataset.i]; c.qty += +b.dataset.d;
+      if (c.qty <= 0) cart.splice(+b.dataset.i, 1);
+      renderGrid(); renderCart();
+    });
+    const clr = $('#clr'); if (clr) clr.onclick = () => { cart = []; paid = ''; renderGrid(); renderCart(); };
+    const inp = $('#paid');
+    inp.oninput = () => { paid = inp.value.replace(/[^\d]/g,''); const pos = inp.value.length; renderCart(); const ni = $('#paid'); ni.focus(); ni.setSelectionRange(pos,pos); };
+    el.querySelectorAll('.quick button').forEach(b => b.onclick = () => {
+      const q = b.dataset.q;
+      paid = q === 'exact' ? String(total) : String((Number(paid)||0) + Number(q));
+      renderCart();
+    });
+    $('#checkout').onclick = checkout;
+  }
+  let busy = false;
+  async function checkout(){
+    if (!cart.length || busy) return;
+    busy = true;
+    const now = new Date(), total = cartTotal(), p = Number(paid) || total;
+    const order = { id: uid(), date: dayKey(now), ts: now.getTime(),
+      items: cart.map(c => ({ name:c.name, price:c.price, qty:c.qty })), total, paid: p, change: p - total };
+    try {
+      saveOrder(order);
+      toast(order.change > 0 ? `已結帳 · 找零 ${money(order.change)}` : `已結帳 ${money(total)}`);
+      cart = []; paid = ''; renderGrid(); renderCart();
+    } catch(e) {
+      toast('手機儲存失敗，請截圖記下這筆');
+    } finally { busy = false; }
+  }
+
+  // custom item
+  function openCustom(){ $('#cName').value=''; $('#cPrice').value=''; $('#modal').classList.add('on'); setTimeout(()=>$('#cPrice').focus(),50); }
+  $('#cCancel').onclick = () => $('#modal').classList.remove('on');
+  $('#modal').onclick = e => { if (e.target.id === 'modal') $('#modal').classList.remove('on'); };
+  $('#cOk').onclick = () => {
+    const pr = Number(String($('#cPrice').value).replace(/[^\d.]/g,''));
+    if (!pr) { toast('請輸入金額'); return; }
+    addToCart(($('#cName').value.trim() || '自訂品項'), pr);
+    $('#modal').classList.remove('on');
+  };
+
+  // ---------- stats ----------
+  $('#dPick').value = viewDay;
+  $('#dPick').onchange = e => { if (e.target.value) { viewDay = e.target.value; watchDay(); } };
+  function shiftDay(n){ const [y,m,d] = viewDay.split('-').map(Number); const dt = new Date(y,m-1,d+n); viewDay = dayKey(dt); $('#dPick').value = viewDay; watchDay(); }
+  $('#dPrev').onclick = () => shiftDay(-1);
+  $('#dNext').onclick = () => shiftDay(1);
+
+  let pendingDel = null;
+  function renderStats(loading){
+    const isToday = viewDay === dayKey(new Date());
+    document.querySelector('nav button[data-v=stat]').textContent = isToday ? '今日統計' : '統計';
+    const el = $('#stat');
+    if (loading) { el.innerHTML = '<div class="empty">讀取中…</div>'; return; }
+    const revenue = dayOrders.reduce((s,o) => s + o.total, 0);
+    const qty = dayOrders.reduce((s,o) => s + o.items.reduce((a,i) => a + i.qty, 0), 0);
+    const agg = {};
+    dayOrders.forEach(o => o.items.forEach(i => {
+      const a = agg[i.name] || (agg[i.name] = { name:i.name, qty:0, amt:0 });
+      a.qty += i.qty; a.amt += i.qty * i.price;
+    }));
+    const rows = Object.values(agg).sort((a,b) => b.qty - a.qty || b.amt - a.amt);
+    const maxQ = rows.length ? rows[0].qty : 1;
+    if (!dayOrders.length) { el.innerHTML = `<div class="empty">${isToday ? '今天' : '這天'}還沒有成交紀錄</div>`; return; }
+    el.innerHTML = `
+      <div class="kpis">
+        <div class="kpi big"><small>營業額</small><b>${money(revenue)}</b></div>
+        <div class="kpi"><small>成交筆數</small><b>${dayOrders.length}</b></div>
+        <div class="kpi"><small>賣出件數</small><b>${qty}</b></div>
+        <div class="kpi"><small>平均客單</small><b>${money(revenue / dayOrders.length)}</b></div>
+      </div>
+      <div class="sec-t">賣出品項</div>
+      <table><thead><tr><th>品項</th><th class="r">數量</th><th class="r">金額</th></tr></thead><tbody>
+        ${rows.map(r => `<tr><td>${esc(r.name)}<div class="bar"><i style="width:${r.qty/maxQ*100}%"></i></div></td><td class="r">${r.qty}</td><td class="r">${money(r.amt)}</td></tr>`).join('')}
+        <tr><td><b>合計</b></td><td class="r"><b>${qty}</b></td><td class="r"><b>${money(revenue)}</b></td></tr>
+      </tbody></table>
+      <button class="btn sec" id="copySum" style="margin-top:10px">複製統計文字</button>
+      <div class="sec-t">每筆明細（新到舊）</div>
+      ${dayOrders.slice().reverse().map(o => {
+        const t = new Date(o.ts);
+        return `<div class="order"><div class="top"><span>${pad(t.getHours())}:${pad(t.getMinutes())}</span><span>${money(o.total)}</span></div>
+          <div class="its">${o.items.map(i => esc(i.name) + ' ×' + i.qty).join('、')}${o.change > 0 ? ` · 收 ${money(o.paid)} 找 ${money(o.change)}` : ''}</div>
+          <button class="del" data-id="${o.id}">${pendingDel === o.id ? '確定刪除？再按一次' : '刪除這筆'}</button></div>`;
+      }).join('')}`;
+    el.querySelectorAll('.del').forEach(b => b.onclick = async () => {
+      const id = b.dataset.id;
+      if (pendingDel !== id) { pendingDel = id; renderStats(); setTimeout(() => { if (pendingDel === id) { pendingDel = null; renderStats(); } }, 4000); return; }
+      pendingDel = null;
+      const o = dayOrders.find(x => x.id === id);
+      deleteOrder(o); toast('已刪除');
+    });
+    $('#copySum').onclick = async () => {
+      const txt = `${viewDay} 營業統計\n營業額 ${money(revenue)}｜${dayOrders.length} 筆｜${qty} 件\n` +
+        rows.map(r => `${r.name} ×${r.qty}  ${money(r.amt)}`).join('\n');
+      try { await navigator.clipboard.writeText(txt); toast('已複製'); } catch(e){ toast('無法複製，請手動截圖'); }
+    };
+  }
+
+  // ---------- products ----------
+  $('#pform').onsubmit = e => {
+    e.preventDefault();
+    const name = $('#pName').value.trim();
+    const price = Number(String($('#pPrice').value).replace(/[^\d.]/g,''));
+    if (!name || !price) { toast('請輸入名稱和價格'); return; }
+    products.push({ id: uid(), name, price });
+    $('#pName').value = ''; $('#pPrice').value = ''; $('#pName').focus();
+    saveProducts(); renderProducts(); renderGrid();
+  };
+  function renderProducts(){
+    const el = $('#plist');
+    if (!products.length) { el.innerHTML = '<div class="empty">輸入名稱和價格後按「新增商品」<br>收銀頁就會出現按鈕</div>'; return; }
+    el.innerHTML = products.map((p,i) => `<div class="pitem" data-i="${i}">
+      <button class="mv" data-up="${i}" ${i===0?'disabled style="opacity:.3"':''}>↑</button>
+      <input class="nmi" value="${esc(p.name)}" data-f="name">
+      <input class="pri" value="${p.price}" inputmode="numeric" data-f="price">
+      <button class="x" data-x="${i}">${pendingP === p.id ? '確定' : '✕'}</button></div>`).join('') +
+      '<div style="color:var(--mute);font-size:13px;padding:6px 4px">改名或改價後點別處即儲存；已結帳的紀錄不受影響。</div>';
+    el.querySelectorAll('.pitem input').forEach(inp => inp.onchange = () => {
+      const i = +inp.closest('.pitem').dataset.i, f = inp.dataset.f;
+      if (f === 'price') { const v = Number(inp.value.replace(/[^\d.]/g,'')); if (!v) { inp.value = products[i].price; return; } products[i].price = v; }
+      else { const v = inp.value.trim(); if (!v) { inp.value = products[i].name; return; } products[i].name = v; }
+      saveProducts(); renderGrid(); toast('已儲存');
+    });
+    el.querySelectorAll('[data-up]').forEach(b => b.onclick = () => {
+      const i = +b.dataset.up; if (!i) return;
+      [products[i-1], products[i]] = [products[i], products[i-1]];
+      saveProducts(); renderProducts(); renderGrid();
+    });
+    el.querySelectorAll('[data-x]').forEach(b => b.onclick = () => {
+      const p = products[+b.dataset.x];
+      if (pendingP !== p.id) { pendingP = p.id; renderProducts(); setTimeout(() => { if (pendingP === p.id) { pendingP = null; renderProducts(); } }, 4000); return; }
+      pendingP = null;
+      products = products.filter(x => x.id !== p.id);
+      saveProducts(); renderProducts(); renderGrid();
+    });
+  }
+  let pendingP = null;
+
+  // ---------- misc ----------
+  let tt;
+  function toast(m){ const t = $('#toast'); t.textContent = m; t.classList.add('on'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('on'), 2000); }
+  function renderAll(){ renderGrid(); renderCart(); renderProducts(); }
+
+  init();
+})();
+</script>
+</body>
+</html>
