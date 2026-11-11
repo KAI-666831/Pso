@@ -333,6 +333,10 @@
     if (flushing) { flushAgain = true; return; }
     flushing = true; clearTimeout(retryT); setSync();
     try {
+      if (isAdmin()) {   // 老闆每次同步都重新確認密碼並取得最新的員工密碼
+        const h = await api('hello');
+        if (h.staffKey && h.staffKey !== sync.staffKey) { sync.staffKey = h.staffKey; LS.set('sync', sync); }
+      }
       if (isAdmin() && configDirty) {
         await api('setConfig', { config: buildConfig() });
         configDirty = false; LS.set('configDirty', false);
