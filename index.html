@@ -399,13 +399,24 @@
       <div class="row"><button class="btn sec" id="sNow">${flushing ? '同步中…' : '立即同步'}</button>
       ${isAdmin() ? '<button class="btn sec" id="sJoin">複製員工加入碼</button>' : ''}</div>
       <button class="link" id="sOff" style="margin-top:12px">${pendingOff ? '確定中斷同步？再按一次' : '中斷同步'}</button>
-      <div style="color:var(--mute);font-size:12px;margin-top:8px">App 版本 v9</div>`;
+      <div style="color:var(--mute);font-size:12px;margin-top:8px">App 版本 v10</div>`;
     $('#sRename').onchange = e => {
       const v = e.target.value.trim();
       if (!v) { e.target.value = sync.name; toast('名字不能空白'); return; }
       if (v === sync.name) return;
+      const old = sync.name;
       sync.name = v; LS.set('sync', sync);
-      toast('名字已更新，之後的成交會用新名字');
+      // 這支手機以前結的單也一起改名
+      let n = 0;
+      try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i);
+        if (!k || !k.startsWith('pos:day:')) continue;
+        const arr = JSON.parse(localStorage.getItem(k)); let ch = false;
+        arr.forEach(o => { if (!o.by || o.by === old) { o.by = v; ch = true; n++; } });
+        if (ch) localStorage.setItem(k, JSON.stringify(arr)); } } catch(e){}
+      queue.forEach(q => { if (q.op === 'add' && (!q.order.by || q.order.by === old)) q.order.by = v; });
+      queue.push({ op:'ren', name: v, order:{ id:'ren-' + uid() } }); saveQueue();
+      cloud = {}; refreshDay(); flush(); if (useCloudStats()) loadCloudDay(viewDay, true);
+      toast(n ? `名字已更新，以前的 ${n} 筆也改好了` : '名字已更新');
     };
     $('#sNow').onclick = () => { flush(); if (useCloudStats()) loadCloudDay(viewDay, true); };
     const j = $('#sJoin'); if (j) j.onclick = async () => {

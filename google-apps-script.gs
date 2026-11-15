@@ -90,6 +90,7 @@ function pushOps(ops, role, dev) {
   const newRaw = [], newDet = [];
   const seen = {};
   ops.forEach(function (op) {
+    if (op.op === 'ren') { renameDevice(dev, String(op.name || '')); return; }
     const o = op.order || {};
     if (!o.id) return;
     if (op.op === 'add') {
@@ -115,6 +116,28 @@ function pushOps(ops, role, dev) {
   });
   if (newRaw.length) { ensureRows(raw, newRaw.length); raw.getRange(raw.getLastRow() + 1, 1, newRaw.length, 5).setValues(newRaw); }
   if (newDet.length) { ensureRows(det, newDet.length); det.getRange(det.getLastRow() + 1, 1, newDet.length, 11).setValues(newDet); }
+}
+
+// 改名字：這支手機以前上傳的單，人員一起改成新名字
+function renameDevice(dev, name) {
+  if (!dev || !name) return;
+  const raw = RAW(), det = DETAIL();
+  if (raw.getLastRow() < 2) return;
+  const rng = raw.getRange(2, 1, raw.getLastRow() - 1, 5);
+  const vals = rng.getValues(), ids = {};
+  let changed = false;
+  vals.forEach(function (r) {
+    if (String(r[4]) !== dev) return;
+    try { const o = JSON.parse(r[2]); o.by = name; r[2] = JSON.stringify(o); ids[String(r[0])] = true; changed = true; } catch (e) {}
+  });
+  if (changed) rng.setValues(vals);
+  if (det.getLastRow() < 2) return;
+  const n = det.getLastRow() - 1;
+  const idCol = det.getRange(2, 10, n, 1).getValues();
+  const who = det.getRange(2, 4, n, 1);
+  const whoVals = who.getValues();
+  idCol.forEach(function (r, i) { if (ids[String(r[0])]) whoVals[i][0] = name; });
+  who.setValues(whoVals);
 }
 
 function ensureRows(sh, n) {
