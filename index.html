@@ -109,7 +109,10 @@
   .daybar{display:flex;align-items:center;gap:8px;margin-bottom:12px}
   .daybar button{width:40px;height:40px;border-radius:10px;background:#ebe7dd;font-size:18px}
   .daybar input{flex:1;padding:9px;border:1px solid var(--line);border-radius:10px;background:#fff;text-align:center}
-  .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+  .kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:12px}
+  .kpi.head b{color:var(--accent)}
+  .pitem .hd{width:34px;height:34px;border-radius:8px;background:#f0ede6;color:var(--mute);font-weight:700;flex:0 0 auto}
+  .pitem .hd.on{background:var(--accent);color:#fff}
   .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
   .kpi small{color:var(--mute);font-size:12px}
   .kpi b{display:block;font-size:20px;margin-top:2px;font-variant-numeric:tabular-nums}
@@ -134,7 +137,7 @@
   .plist{margin-top:10px}
   .pitem{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px 10px;margin-bottom:6px}
   .pitem input{padding:8px;border:1px solid var(--line);border-radius:8px;min-width:0}
-  .pitem .nmi{flex:2}.pitem .pri{flex:1;max-width:96px}
+  .pitem .nmi{flex:2}.pitem .pri{flex:1;max-width:76px}
   .pitem .mv{width:30px;height:34px;border-radius:8px;background:#f0ede6}
   .pitem .x{width:34px;height:34px;border-radius:8px;color:var(--warn);background:#f8ece9;font-weight:700}
 
@@ -416,7 +419,7 @@
       <div class="row"><button class="btn sec" id="sNow">${flushing ? '同步中…' : '立即同步'}</button>
       ${isAdmin() ? '<button class="btn sec" id="sJoin">複製員工加入碼</button>' : ''}</div>
       <button class="link" id="sOff" style="margin-top:12px">${pendingOff ? '確定中斷同步？再按一次' : '中斷同步'}</button>
-      <div style="color:var(--mute);font-size:12px;margin-top:8px">App 版本 v13</div>`;
+      <div style="color:var(--mute);font-size:12px;margin-top:8px">App 版本 v14</div>`;
     $('#sRename').onchange = e => {
       const v = e.target.value.trim();
       if (!v) { e.target.value = sync.name; toast('名字不能空白'); return; }
@@ -548,6 +551,11 @@
     products = LS.get('products', []);
     loadCats();
     loadShifts();
+    if (!LS.get('headInit', false) && !(sync && sync.role === 'staff')) {
+      products.forEach(p => { const n = String(p.name).replace(/\s+/g,''); if (n === '釣手' || n === '觀光') p.head = true; });
+      LS.set('products', products); LS.set('headInit', true);
+      if (sync && sync.role === 'admin') { LS.set('configDirty', true); configDirty = true; }
+    }
     if (!LS.ok) toast('這個瀏覽器不能本機儲存');
     try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch(e){}
     if ('serviceWorker' in navigator) { try { navigator.serviceWorker.register('sw.js'); } catch(e){} }
@@ -567,10 +575,10 @@
   });
 
   // ---------- register ----------
-  function addToCart(name, price, key){
+  function addToCart(name, price, key, head){
     const k = key || ('c:' + name + ':' + price);
     const ex = cart.find(c => c.key === k);
-    if (ex) ex.qty++; else cart.push({ key:k, name, price, qty:1 });
+    if (ex) ex.qty++; else cart.push({ key:k, name, price, qty:1, head: !!head });
     renderGrid(); renderCart();
   }
   function renderGrid(){
@@ -590,10 +598,18 @@
         `<div class="grid">${x.items.map(btn).join('')}</div>`).join('') +
       `${showHead ? '<div class="sec-h">其他</div>' : ''}<div class="grid" style="${showHead ? '' : 'margin-top:8px'}"><button class="prod custom" id="custom"><span class="n">＋ 自訂</span><span class="p">臨時品項</span></button></div>`;
     g.querySelectorAll('.prod[data-id]').forEach(b => b.onclick = () => {
-      const p = products.find(x => x.id === b.dataset.id); if (p) addToCart(p.name, p.price, 'p:' + p.id);
+      const p = products.find(x => x.id === b.dataset.id); if (p) addToCart(p.name, p.price, 'p:' + p.id, !!p.head);
     });
     $('#custom').onclick = openCustom;
   }
+  // 算人頭：商品勾了「人」，或舊紀錄裡名稱是 釣手 / 觀光
+  const headNorm = t => String(t).replace(/\s+/g,'');
+  function isHead(i){
+    if (i.head !== undefined) return !!i.head;
+    const n = headNorm(i.name);
+    return products.some(p => p.head && headNorm(p.name) === n) || n === '釣手' || n === '觀光';
+  }
+  const headsOf = items => items.reduce((a,i) => a + (isHead(i) ? i.qty : 0), 0);
   function cartTotal(){ return cart.reduce((s,c) => s + c.price * c.qty, 0); }
   function renderCart(){
     const el = $('#cart');
@@ -602,7 +618,7 @@
     const p = Number(paid) || 0;
     const ch = p - total;
     el.innerHTML = `
-      <div class="cart-h"><span>本單 ${count} 件</span>${cart.length ? '<button class="link" id="clr">清空</button>' : ''}</div>
+      <div class="cart-h"><span>本單 ${count} 件${headsOf(cart) ? ` · <b style="color:var(--accent)">${headsOf(cart)} 人</b>` : ''}</span>${cart.length ? '<button class="link" id="clr">清空</button>' : ''}</div>
       ${cart.map((c,i) => `<div class="line"><div class="nm">${esc(c.name)}<small>${money(c.price)}</small></div>
         <div class="qty"><button data-i="${i}" data-d="-1">−</button><span>${c.qty}</span><button data-i="${i}" data-d="1">＋</button></div>
         <div class="sub">${money(c.price*c.qty)}</div></div>`).join('')}
@@ -636,7 +652,7 @@
     busy = true;
     const now = new Date(), total = cartTotal(), p = Number(paid) || total;
     const order = { id: uid(), date: dayKey(now), ts: now.getTime(), shift: curShift, shiftName: shiftName(curShift), by: sync ? sync.name : '',
-      items: cart.map(c => ({ name:c.name, price:c.price, qty:c.qty })), total, paid: p, change: p - total };
+      items: cart.map(c => ({ name:c.name, price:c.price, qty:c.qty, head: !!c.head })), total, paid: p, change: p - total };
     try {
       saveOrder(order);
       toast(order.change > 0 ? `已結帳 · 找零 ${money(order.change)}` : `已結帳 ${money(total)}`);
@@ -683,6 +699,7 @@
     const list = statShift ? all.filter(o => shiftOf(o) === statShift) : all;
     const revenue = list.reduce((s,o) => s + o.total, 0);
     const qty = list.reduce((s,o) => s + o.items.reduce((a,i) => a + i.qty, 0), 0);
+    const heads = list.reduce((s,o) => s + headsOf(o.items), 0);
     const agg = {};
     list.forEach(o => o.items.forEach(i => {
       const a = agg[i.name] || (agg[i.name] = { name:i.name, qty:0, amt:0 });
@@ -699,21 +716,22 @@
     if (!list.length) { el.innerHTML = chips + `<div class="empty">${isToday ? '今天' : '這天'}${statShift ? '這個班別' : ''}還沒有成交紀錄</div>`; bindChips(); return; }
     let perShift = '';
     if (!statShift && present.length > 1) {
-      perShift = `<div class="sec-t">各班別</div><table><thead><tr><th>班別</th><th class="r">筆數</th><th class="r">金額</th></tr></thead><tbody>${
+      perShift = `<div class="sec-t">各班別</div><table><thead><tr><th>班別</th><th class="r">人數</th><th class="r">筆數</th><th class="r">金額</th></tr></thead><tbody>${
         present.map(id => { const os = all.filter(o => shiftOf(o) === id);
-          return `<tr><td>${esc(nameOf(id))}</td><td class="r">${os.length}</td><td class="r">${money(os.reduce((t,o) => t + o.total, 0))}</td></tr>`; }).join('')}</tbody></table>`;
+          return `<tr><td>${esc(nameOf(id))}</td><td class="r">${os.reduce((t,o) => t + headsOf(o.items), 0)}</td><td class="r">${os.length}</td><td class="r">${money(os.reduce((t,o) => t + o.total, 0))}</td></tr>`; }).join('')}</tbody></table>`;
     }
     const people = [...new Set(list.map(o => o.by || ''))];
     if (people.length > 1 || (people.length === 1 && useCloudStats() && people[0])) {
-      perShift += `<div class="sec-t">各人員</div><table><thead><tr><th>人員</th><th class="r">筆數</th><th class="r">金額</th></tr></thead><tbody>${
+      perShift += `<div class="sec-t">各人員</div><table><thead><tr><th>人員</th><th class="r">人數</th><th class="r">筆數</th><th class="r">金額</th></tr></thead><tbody>${
         people.map(p => { const os = list.filter(o => (o.by || '') === p);
-          return `<tr><td>${esc(p || '（未填名字）')}</td><td class="r">${os.length}</td><td class="r">${money(os.reduce((t,o) => t + o.total, 0))}</td></tr>`; }).join('')}</tbody></table>`;
+          return `<tr><td>${esc(p || '（未填名字）')}</td><td class="r">${os.reduce((t,o) => t + headsOf(o.items), 0)}</td><td class="r">${os.length}</td><td class="r">${money(os.reduce((t,o) => t + o.total, 0))}</td></tr>`; }).join('')}</tbody></table>`;
     }
     const myDev = sync ? sync.dev : '';
     const localIds = new Set(localDay(viewDay).map(o => o.id));
     el.innerHTML = chips + `
       <div class="kpis">
         <div class="kpi big"><small>營業額</small><b>${money(revenue)}</b></div>
+        <div class="kpi head"><small>人數</small><b>${heads} 人</b></div>
         <div class="kpi"><small>成交筆數</small><b>${list.length}</b></div>
         <div class="kpi"><small>賣出件數</small><b>${qty}</b></div>
         <div class="kpi"><small>平均客單</small><b>${money(revenue / list.length)}</b></div>
@@ -741,7 +759,7 @@
       deleteOrder(o); toast('已刪除');
     });
     $('#copySum').onclick = async () => {
-      const txt = `${viewDay}${statShift ? ' ' + nameOf(statShift) : ''} 營業統計\n營業額 ${money(revenue)}｜${list.length} 筆｜${qty} 件\n` +
+      const txt = `${viewDay}${statShift ? ' ' + nameOf(statShift) : ''} 營業統計\n營業額 ${money(revenue)}｜${heads} 人｜${list.length} 筆｜${qty} 件\n` +
         rows.map(r => `${r.name} ×${r.qty}  ${money(r.amt)}`).join('\n');
       try { await navigator.clipboard.writeText(txt); toast('已複製'); } catch(e){ toast('無法複製，請手動截圖'); }
     };
@@ -897,11 +915,12 @@
         <input class="nmi" value="${esc(p.name)}" data-f="name">
         <input class="pri" value="${p.price}" inputmode="numeric" data-f="price">
         <select data-mv="${p.id}" aria-label="移到區塊">${catOptions(p.cat)}</select>
+        <button class="hd ${p.head ? 'on' : ''}" data-hd="${p.id}" aria-label="算人頭">人</button>
         <button class="x" data-x="${p.id}">${pendingP === p.id ? '確定' : '✕'}</button></div>`).join('');
       return head + (rows || '<div style="color:var(--mute);font-size:13px;padding:4px 6px 8px">這個區塊還沒有商品</div>');
     }).join('') +
       `<form class="addcat" id="addcat"><input id="newCat" placeholder="新區塊名稱" autocomplete="off"><button type="submit">＋ 新增區塊</button></form>
-       <div style="color:var(--mute);font-size:13px;padding:8px 4px">點區塊名稱可以直接改名；商品右邊的選單可以換區塊。改完點別處即儲存，已結帳的紀錄不受影響。</div>`;
+       <div style="color:var(--mute);font-size:13px;padding:8px 4px">點區塊名稱可以直接改名；商品右邊的選單可以換區塊；綠色「人」代表這個商品結帳時算人頭。改完點別處即儲存，已結帳的紀錄不受影響。</div>`;
 
     const byId = id => products.find(p => p.id === id);
     el.querySelectorAll('.pitem input').forEach(inp => inp.onchange = () => {
@@ -909,6 +928,10 @@
       if (f === 'price') { const v = Number(inp.value.replace(/[^\d.]/g,'')); if (!v) { inp.value = p.price; return; } p.price = v; }
       else { const v = inp.value.trim(); if (!v) { inp.value = p.name; return; } p.name = v; }
       saveProducts(); renderGrid(); toast('已儲存');
+    });
+    el.querySelectorAll('[data-hd]').forEach(b => b.onclick = () => {
+      const p = byId(b.dataset.hd); p.head = !p.head;
+      saveProducts(); renderProducts(); renderGrid(); toast(p.head ? `「${p.name}」會算人頭` : `「${p.name}」不算人頭`);
     });
     el.querySelectorAll('[data-mv]').forEach(sel => sel.onchange = () => {
       const p = byId(sel.dataset.mv);
