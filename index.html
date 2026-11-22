@@ -305,18 +305,18 @@
     if (!isAdmin()) return;
     configDirty = true; LS.set('configDirty', true); flush();
   }
-  // 員工手機只保留最近 7 天（含今天）的紀錄；還沒上傳的單一律保留
+  // 員工手機只保留最近 24 小時的紀錄；還沒上傳的單一律保留
   function pruneStaff(){
     if (!isStaff()) return;
-    const d = new Date(); d.setDate(d.getDate() - 6);
-    const cutoff = dayKey(d);
+    const cutoff = Date.now() - 24 * 3600 * 1000;
     const pending = new Set(queue.filter(q => q.op === 'add').map(q => q.order.id));
     const keys = [];
     try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('pos:day:')) keys.push(k); } } catch(e){ return; }
     keys.forEach(k => {
-      if (k.slice(8) >= cutoff) return;
       try {
-        const keep = JSON.parse(localStorage.getItem(k)).filter(o => pending.has(o.id));
+        const arr = JSON.parse(localStorage.getItem(k));
+        const keep = arr.filter(o => o.ts >= cutoff || pending.has(o.id));
+        if (keep.length === arr.length) return;
         if (keep.length) localStorage.setItem(k, JSON.stringify(keep)); else localStorage.removeItem(k);
       } catch(e){}
     });
@@ -416,7 +416,7 @@
       <div class="row"><button class="btn sec" id="sNow">${flushing ? '同步中…' : '立即同步'}</button>
       ${isAdmin() ? '<button class="btn sec" id="sJoin">複製員工加入碼</button>' : ''}</div>
       <button class="link" id="sOff" style="margin-top:12px">${pendingOff ? '確定中斷同步？再按一次' : '中斷同步'}</button>
-      <div style="color:var(--mute);font-size:12px;margin-top:8px">App 版本 v12</div>`;
+      <div style="color:var(--mute);font-size:12px;margin-top:8px">App 版本 v13</div>`;
     $('#sRename').onchange = e => {
       const v = e.target.value.trim();
       if (!v) { e.target.value = sync.name; toast('名字不能空白'); return; }
@@ -679,7 +679,7 @@
       el.querySelectorAll('[data-reload]').forEach(b => b.onclick = () => loadCloudDay(viewDay, true));
     };
     const all = dayOrders;
-    const staffTip = isStaff() ? '<div style="color:var(--mute);font-size:13px;margin:-4px 2px 10px">這支手機只保留最近 7 天的紀錄（已上傳到老闆的試算表）</div>' : '';
+    const staffTip = isStaff() ? '<div style="color:var(--mute);font-size:13px;margin:-4px 2px 10px">這支手機只保留最近 24 小時的紀錄（已上傳到老闆的試算表）</div>' : '';
     const list = statShift ? all.filter(o => shiftOf(o) === statShift) : all;
     const revenue = list.reduce((s,o) => s + o.total, 0);
     const qty = list.reduce((s,o) => s + o.items.reduce((a,i) => a + i.qty, 0), 0);
