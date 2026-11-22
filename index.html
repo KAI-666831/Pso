@@ -305,6 +305,22 @@
     if (!isAdmin()) return;
     configDirty = true; LS.set('configDirty', true); flush();
   }
+  // 員工手機只保留今天和昨天的紀錄；還沒上傳的單一律保留
+  function pruneStaff(){
+    if (!isStaff()) return;
+    const d = new Date(); d.setDate(d.getDate() - 1);
+    const cutoff = dayKey(d);
+    const pending = new Set(queue.filter(q => q.op === 'add').map(q => q.order.id));
+    const keys = [];
+    try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('pos:day:')) keys.push(k); } } catch(e){ return; }
+    keys.forEach(k => {
+      if (k.slice(8) >= cutoff) return;
+      try {
+        const keep = JSON.parse(localStorage.getItem(k)).filter(o => pending.has(o.id));
+        if (keep.length) localStorage.setItem(k, JSON.stringify(keep)); else localStorage.removeItem(k);
+      } catch(e){}
+    });
+  }
   async function api(action, extra, override){
     const s = override || sync;
     const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 25000);
@@ -348,6 +364,7 @@
       }
       if (isStaff()) { const j = await api('getConfig'); if (applyConfig(j.config)) toast('商品已更新'); }
       syncErr = ''; lastSync = Date.now(); LS.set('lastSync', lastSync);
+      pruneStaff(); refreshDay();
     } catch(e) {
       syncErr = e.message || '同步失敗';
       retryT = setTimeout(flush, navigator.onLine === false ? 60000 : 20000);
@@ -399,7 +416,7 @@
       <div class="row"><button class="btn sec" id="sNow">${flushing ? '同步中…' : '立即同步'}</button>
       ${isAdmin() ? '<button class="btn sec" id="sJoin">複製員工加入碼</button>' : ''}</div>
       <button class="link" id="sOff" style="margin-top:12px">${pendingOff ? '確定中斷同步？再按一次' : '中斷同步'}</button>
-      <div style="color:var(--mute);font-size:12px;margin-top:8px">App 版本 v10</div>`;
+      <div style="color:var(--mute);font-size:12px;margin-top:8px">App 版本 v11</div>`;
     $('#sRename').onchange = e => {
       const v = e.target.value.trim();
       if (!v) { e.target.value = sync.name; toast('名字不能空白'); return; }
@@ -535,7 +552,7 @@
     try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch(e){}
     if ('serviceWorker' in navigator) { try { navigator.serviceWorker.register('sw.js'); } catch(e){} }
     renderAll(); refreshDay();
-    if (sync) { flush(); if (useCloudStats()) loadCloudDay(viewDay); }
+    if (sync) { pruneStaff(); refreshDay(); flush(); if (useCloudStats()) loadCloudDay(viewDay); }
     $('#bkBtn').onclick = doBackup;
     $('#csvBtn').onclick = doCsv;
     $('#rsBtn').onclick = () => $('#rsFile').click();
@@ -662,6 +679,7 @@
       el.querySelectorAll('[data-reload]').forEach(b => b.onclick = () => loadCloudDay(viewDay, true));
     };
     const all = dayOrders;
+    const staffTip = isStaff() ? '<div style="color:var(--mute);font-size:13px;margin:-4px 2px 10px">這支手機只保留今天和昨天的紀錄（已上傳到老闆的試算表）</div>' : '';
     const list = statShift ? all.filter(o => shiftOf(o) === statShift) : all;
     const revenue = list.reduce((s,o) => s + o.total, 0);
     const qty = list.reduce((s,o) => s + o.items.reduce((a,i) => a + i.qty, 0), 0);
@@ -675,7 +693,7 @@
     const present = [...new Set(all.map(shiftOf))];
     const chipIds = shifts.map(x => x.id).concat(present.filter(id => !shifts.some(x => x.id === id)));
     const nameOf = id => shiftName(id) || ((all.find(o => shiftOf(o) === id) || {}).shiftName) || '已刪除班別';
-    const chips = src + (chipIds.length > 1 ? `<div class="shiftbar"><button class="chip ${statShift ? '' : 'on'}" data-sf="">全部</button>${
+    const chips = staffTip + src + (chipIds.length > 1 ? `<div class="shiftbar"><button class="chip ${statShift ? '' : 'on'}" data-sf="">全部</button>${
       chipIds.map(id => `<button class="chip ${statShift === id ? 'on' : ''}" data-sf="${id}">${esc(nameOf(id))}</button>`).join('')}</div>` : '');
     const bindChips = () => { bindSrc(); el.querySelectorAll('[data-sf]').forEach(b => b.onclick = () => { statShift = b.dataset.sf; renderStats(); }); };
     if (!list.length) { el.innerHTML = chips + `<div class="empty">${isToday ? '今天' : '這天'}${statShift ? '這個班別' : ''}還沒有成交紀錄</div>`; bindChips(); return; }
